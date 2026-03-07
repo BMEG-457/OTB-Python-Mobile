@@ -2,19 +2,14 @@ import struct
 import numpy as np
 import time
 import socket
-from PyQt5 import QtCore
+import threading 
 from app.processing.pipeline import ProcessingPipeline, get_pipeline
 
 
-class DataReceiverThread(QtCore.QThread):
-    data_received = QtCore.pyqtSignal(np.ndarray)
-    # emits (stage_name, array) for intermediate outputs
-    stage_output = QtCore.pyqtSignal(str, np.ndarray)
-    status_update = QtCore.pyqtSignal(str)
-    error_signal = QtCore.pyqtSignal(str)
+class DataReceiverThread(threading.Thread):
 
-    def __init__(self, device, client_socket, tracks):
-        super().__init__()
+    def __init__(self, device, client_socket, tracks,  on_data=None, on_stage_output=None, on_status=None, on_error=None):
+        super().__init__(daemon=True)
         self.device = device
         self.client_socket = client_socket
         self.tracks = tracks
@@ -25,6 +20,11 @@ class DataReceiverThread(QtCore.QThread):
         
         # Processing pipelines for multi-stage output
         self.processor = get_pipeline('final')
+
+        self.on_data = on_data
+        self.on_stage_output = on_stage_output
+        self.on_status = on_status
+        self.on_error = on_error
         
         # Set socket timeout to prevent infinite blocking
         try:
@@ -54,8 +54,8 @@ class DataReceiverThread(QtCore.QThread):
                 
                 if not chunk:
                     print("[RECEIVER] Socket closed by remote end")
-                    self.error_signal.emit("Connection closed by device")
-                    thread_alive = False
+                    if self.on_error:
+                        self.on_error("Connection closed by device")
                     break
                 
                 buffer += chunk
@@ -69,48 +69,34 @@ class DataReceiverThread(QtCore.QThread):
                     # Unpack as big-endian signed shorts (16-bit)
                     unpacked_data = struct.unpack(f'>{len(data) // 2}h', data)
                     reshaped_data = np.array(unpacked_data).reshape((-1, self.device.nchannels)).T
-
-                    # Emit raw stage
-                    try:
-                        self.stage_output.emit('raw', reshaped_data.copy())
-                    except Exception as e:
-                        if self.packet_count == 0:
-                            print(f"[RECEIVER] ERROR emitting raw stage_output: {e}")
                     
                     # Filtered stage with fallback
+                    if self.on_stage_output:
+                        self.on_stage_output('raw', reshaped_data.copy())
                     try:
                         filtered = get_pipeline('filtered').run(reshaped_data)
-                        self.stage_output.emit('filtered', filtered.copy())
-                    except Exception as e:
-                        if self.packet_count == 0:
-                            print(f"[RECEIVER] Filtering failed (likely small packet), using raw data: {e}")
+                        if self.on_stage_output:
+                            self.on_stage_output('filtered', filtered.copy())
+                    except Exception:
                         filtered = reshaped_data
                     
                     # Rectified stage with fallback
                     try:
                         rectified = get_pipeline('rectified').run(filtered)
-                        self.stage_output.emit('rectified', rectified.copy())
-                    except Exception as e:
-                        if self.packet_count == 0:
-                            print(f"[RECEIVER] Rectification failed: {e}")
+                        if self.on_stage_output:
+                            self.on_stage_output('rectified', rectified.copy())
+                    except Exception:
                         rectified = filtered
                     
                     # Final processed data with fallback
                     try:
                         processed = self.processor.run(reshaped_data)
-                    except Exception as e:
-                        if self.packet_count == 0:
-                            print(f"[RECEIVER] Final processing failed, using rectified data: {e}")
+                    except Exception:
                         processed = rectified
                     
                     # Emit final stage
-                    try:
-                        self.stage_output.emit('final', processed.copy())
-                        if self.packet_count == 0:
-                            print("[RECEIVER] First 'final' stage_output signal emitted")
-                    except Exception as e:
-                        if self.packet_count == 0:
-                            print(f"[RECEIVER] ERROR emitting final stage_output: {e}")
+                    if self.on_stage_output:
+                        self.on_stage_output('final', processed.copy())
                     
                     # Only feed tracks and emit signals when streaming is active
                     if self.running:
@@ -120,7 +106,8 @@ class DataReceiverThread(QtCore.QThread):
                             track.feed(processed[idx:idx + track.num_channels])
                             idx += track.num_channels
                         
-                        self.data_received.emit(processed)
+                        if self.on_data:
+                            self.on_data(processed)
                     
                     # Update packet count and FPS
                     self.packet_count += 1
@@ -132,9 +119,12 @@ class DataReceiverThread(QtCore.QThread):
                         elapsed = now - self.last_time
                         self.fps = 100 / elapsed if elapsed > 0 else 0
                         self.last_time = now
-                        if self.running:  # Only emit status when streaming
-                            self.status_update.emit(f"Data rate: {self.fps:.1f} packets/s | Channels: {self.device.nchannels}")
-                            print(f"[RECEIVER] Packet #{self.packet_count}: {self.fps:.1f} packets/s")
+
+                        if self.running and self.on_status:
+                            self.on_status(
+                            f"Data rate: {self.fps:.1f} packets/s | Channels: {self.device.nchannels}"
+                            )
+                    print(f"[RECEIVER] Packet #{self.packet_count}: {self.fps:.1f} packets/s")
             
             except socket.timeout:
                 # Socket timeout - normal when paused (running=False)
@@ -145,7 +135,8 @@ class DataReceiverThread(QtCore.QThread):
                 
             except Exception as e:
                 print(f"[RECEIVER] Error: {type(e).__name__}: {e}")
-                self.error_signal.emit(f"Error: {e}")
+                if self.on_error:
+                    self.on_error(f"Error: {e}")
                 import traceback
                 traceback.print_exc()
                 thread_alive = False
