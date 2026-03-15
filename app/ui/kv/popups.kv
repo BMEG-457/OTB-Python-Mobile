@@ -1,0 +1,59 @@
+<CalibrationPopup>:
+    title: "EMG Calibration"
+    size_hint: (0.9, 0.7)
+    auto_dismiss: False
+    BoxLayout:
+        orientation: 'vertical'
+        padding: '10dp'
+        Label:
+            id: phase_label
+            text: "Phase: Waiting"
+            font_size: '20sp'
+            bold: True
+        Label:
+            id: timer_label
+            text: "--"
+            font_size: '60sp'
+            color: (1, 0, 0, 1)
+        BoxLayout:
+            size_hint_y: None
+            height: '50dp'
+            Button:
+                id: start_button
+                text: "Start"
+                on_release: root.start_calibration()
+            Button:
+                text: "Cancel"
+                on_release: root.dismiss()
+
+<ChannelSelectorPopup>:
+    title: "Select Channels"
+    size_hint: (0.9, 0.9)
+    BoxLayout:
+        orientation: 'vertical'
+        ScrollView:
+            GridLayout:
+                id: container
+                cols: 2
+                size_hint_y: None
+                height: self.minimum_height
+        Button:
+            text: "Apply"
+            size_hint_y: None
+            height: '50dp'
+            on_release: root.dismiss()
+
+<FeatureControlsPopup>:
+    title: "Feature Controls"
+    size_hint: (0.8, 0.4)
+    BoxLayout:
+        orientation: 'vertical'
+        padding: '10dp'
+        Label:
+            text: "Computation Window:"
+        Spinner:
+            id: spinner
+            values: ["100 ms", "200 ms", "500 ms", "1000 ms"]
+        Button:
+            text: "OK"
+            on_release: root.dismiss()
