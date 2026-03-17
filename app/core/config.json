@@ -1,0 +1,159 @@
+{
+  "build": {
+    "emulator_build": true
+  },
+
+  "device": {
+    "sample_rate": 2000,
+    "channels": 72,
+    "host": "0.0.0.0",
+    "gateway_ip": "192.168.1.1",
+    "port": 45454,
+    "connect_timeout": 15,
+    "fsamp": 2,
+    "nch": 3,
+    "mode": 0,
+    "hpf": 1,
+    "network_check_timeout": 2
+  },
+
+  "hdsemg": {
+    "channels": 64,
+    "grid_rows": 8,
+    "grid_cols": 8
+  },
+
+  "filter": {
+    "bandpass_low_hz": 20.0,
+    "bandpass_high_hz": 450.0,
+    "bandpass_order": 4,
+    "notch_freq_hz": 60.0,
+    "notch_quality": 30,
+    "notch_order": 2,
+    "min_samples_order4": 27,
+    "min_samples_order1": 9,
+    "notch_min_samples": 15
+  },
+
+  "filter_coefficients": {
+    "bandpass_4_b": [
+      0.05851270857137603, 0.0, -0.23405083428550413, 0.0,
+      0.3510762514282562, 0.0, -0.23405083428550413, 0.0,
+      0.05851270857137603
+    ],
+    "bandpass_4_a": [
+      1.0, -4.309368933349023, 7.9319108380991485,
+      -8.550038317529452, 6.301057981557486, -3.2891058290671884,
+      1.0961784703741042, -0.2042146501465009, 0.02359741417722524
+    ],
+    "bandpass_1_b": [0.4447994860920906, 0.0, -0.4447994860920906],
+    "bandpass_1_a": [1.0, -1.0523515233982244, 0.11040102781581901],
+    "lowpass_10_4_b": [
+      5.845142433144487e-08, 2.3380569732577947e-07, 3.507085459886692e-07,
+      2.3380569732577947e-07, 5.845142433144487e-08
+    ],
+    "lowpass_10_4_a": [
+      1.0, -3.9179078653919865, 5.7570763791180655,
+      -3.7603495076945257, 0.921181929191236
+    ],
+    "notch_60_b": [
+      0.9911535951016631, -3.894467033374115, 5.807868018765449,
+      -3.8944670333741147, 0.9911535951016629
+    ],
+    "notch_60_a": [
+      1.0, -3.9117699222074034, 5.807789758354652,
+      -3.877164144540828, 0.9823854506141249
+    ]
+  },
+
+  "plot": {
+    "display_samples": 4000,
+    "downsample": 4,
+    "channel_index": 0,
+    "bg_rgba": [0.118, 0.118, 0.118, 1.0],
+    "line_rgba": [0.0, 0.800, 0.533, 1.0],
+    "time_window_presets": [
+      {"label": "2s", "display_samples": 4000, "downsample": 4},
+      {"label": "4s", "display_samples": 8000, "downsample": 8},
+      {"label": "8s", "display_samples": 16000, "downsample": 16}
+    ],
+    "default_time_window_idx": 0
+  },
+
+  "calibration": {
+    "rest_duration": 3.0,
+    "mvc_duration": 3.0,
+    "threshold_frac": 0.3,
+    "dismiss_delay": 2,
+    "progress_fps": 30
+  },
+
+  "features": {
+    "bandpass_low": 20.0,
+    "bandpass_high": 450.0,
+    "smooth_cutoff": 10.0,
+    "baseline_duration": 0.5,
+    "k_threshold": 8.0,
+    "amplitude_divisor": 4.0,
+    "min_peak_distance_sec": 0.5,
+    "backtrack_k": 3.0,
+    "min_burst_duration": 0.05,
+    "fatigue_rms_threshold": 0.317,
+    "fatigue_mf_threshold": -0.89,
+    "window_duration": 0.5,
+    "step_duration": 0.1,
+    "bilateral_window_sec": 0.25,
+    "bilateral_step_sec": 0.05
+  },
+
+  "colors": {
+    "multi_track": [
+      [0.0,  0.80, 0.53, 1.0],
+      [0.95, 0.55, 0.10, 1.0],
+      [0.40, 0.60, 1.00, 1.0],
+      [0.90, 0.30, 0.40, 1.0],
+      [0.55, 0.90, 0.20, 1.0],
+      [0.80, 0.40, 0.90, 1.0],
+      [0.20, 0.85, 0.85, 1.0],
+      [1.00, 0.80, 0.10, 1.0]
+    ],
+    "heatmap_cold_rgb": [0.12, 0.12, 0.12],
+    "heatmap_hot_rgb": [0.0, 0.90, 0.40],
+    "btn_stream_idle": [0.1, 0.6, 0.3, 1.0],
+    "btn_record_idle": [0.6, 0.1, 0.1, 1.0],
+    "btn_record_saving": [0.8, 0.4, 0.0, 1.0],
+    "btn_live_mode": [0.1, 0.6, 0.4, 1.0],
+    "btn_analysis_mode": [0.2, 0.4, 0.7, 1.0],
+    "battery_low": [1.0, 0.27, 0.27, 1.0],
+    "battery_med": [1.0, 0.65, 0.0, 1.0],
+    "battery_ok": [0.0, 0.8, 0.27, 1.0],
+    "contraction_active": [0.2, 0.9, 0.4, 1.0],
+    "contraction_inactive": [0.8, 0.3, 0.3, 1.0]
+  },
+
+  "ui": {
+    "update_rate_ms": 16,
+    "render_fps": 30,
+    "heatmap_buffer_samples": 100,
+    "battery_poll_interval": 30,
+    "battery_low_threshold": 20,
+    "battery_med_threshold": 50
+  },
+
+  "data_receiver": {
+    "packet_size_divisor": 16,
+    "socket_timeout": 5.0,
+    "fps_log_interval": 100
+  },
+
+  "recording": {
+    "max_samples": 1000000
+  },
+
+  "paths": {
+    "android_package_name": "org.bmeg457.otbemgapp",
+    "data_dir_name": "OTB_EMG",
+    "desktop_data_dir_name": "OTB_EMG_Data",
+    "recordings_dir_name": "recordings"
+  }
+}
