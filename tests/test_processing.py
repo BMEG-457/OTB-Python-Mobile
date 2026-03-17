@@ -1,48 +1,89 @@
-"""Phase 8.2 — processing layer smoke test.
+"""Unit tests for the processing layer: filters and basic features.
 
-Run from mobile app/:
-    python tests/test_processing.py
+Replaces the Phase 8.2 smoke-test script with proper unittest.TestCase classes.
+Run with:
+    python -m unittest tests.test_processing
 """
 
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import unittest
 import numpy as np
+
 from app.processing.filters import butter_bandpass, notch, rectify
 from app.processing.features import rms, mav, integrated_emg
+from app.core import config as CFG
 
-# Simulate 72 channels, 128 samples (one packet at 2000 Hz / 16 packets/sec)
-CHANNELS = 72
-SAMPLES = 128
-FS = 2000
+_CHANNELS = CFG.DEVICE_CHANNELS   # 72
+_SAMPLES  = 128
+_FS       = CFG.DEVICE_SAMPLE_RATE
 
-fake_data = np.random.randn(CHANNELS, SAMPLES).astype(np.float32)
 
-# --- Filter pipeline ---
-filtered = butter_bandpass(fake_data, 20, 450, FS)
-assert filtered.shape == (CHANNELS, SAMPLES), f"Expected {(CHANNELS, SAMPLES)}, got {filtered.shape}"
+class TestFilterPipeline(unittest.TestCase):
+    """End-to-end pipeline shape and property checks (72 ch, 128 samples)."""
 
-notched = notch(filtered, 60, FS)
-assert notched.shape == (CHANNELS, SAMPLES)
+    def setUp(self):
+        rng = np.random.default_rng(0)
+        self.data = rng.standard_normal((_CHANNELS, _SAMPLES)).astype(np.float32)
 
-rect = rectify(notched)
-assert rect.shape == (CHANNELS, SAMPLES)
-assert np.all(rect >= 0), "rectify() should return non-negative values"
+    def test_bandpass_shape(self):
+        out = butter_bandpass(self.data)
+        self.assertEqual(out.shape, (_CHANNELS, _SAMPLES))
 
-# --- Basic features ---
-rms_val = rms(rect)
-assert rms_val.shape == (CHANNELS, 1), f"Expected ({CHANNELS}, 1), got {rms_val.shape}"
+    def test_notch_shape(self):
+        filtered = butter_bandpass(self.data)
+        out = notch(filtered)
+        self.assertEqual(out.shape, (_CHANNELS, _SAMPLES))
 
-mav_val = mav(rect)
-assert mav_val.shape == (CHANNELS, 1)
+    def test_rectify_shape(self):
+        out = rectify(self.data)
+        self.assertEqual(out.shape, (_CHANNELS, _SAMPLES))
 
-iemg_val = integrated_emg(rect)
-assert iemg_val.shape == (CHANNELS, 1)
+    def test_rectify_non_negative(self):
+        out = rectify(self.data)
+        self.assertTrue(np.all(out >= 0))
 
-print("Processing pipeline OK")
-print(f"  Input shape:  {fake_data.shape}")
-print(f"  RMS shape:    {rms_val.shape}")
-print(f"  MAV shape:    {mav_val.shape}")
-print(f"  IEMG shape:   {iemg_val.shape}")
-print(f"  RMS[0]:       {rms_val[0, 0]:.6f}")
+    def test_full_pipeline_shape(self):
+        filtered  = butter_bandpass(self.data)
+        notched   = notch(filtered)
+        rectified = rectify(notched)
+        self.assertEqual(rectified.shape, (_CHANNELS, _SAMPLES))
+
+    def test_full_pipeline_non_negative(self):
+        filtered  = butter_bandpass(self.data)
+        notched   = notch(filtered)
+        rectified = rectify(notched)
+        self.assertTrue(np.all(rectified >= 0))
+
+
+class TestBasicFeaturesOnPipelineOutput(unittest.TestCase):
+    """Feature shapes on realistic pipeline output (72 ch input)."""
+
+    def setUp(self):
+        rng  = np.random.default_rng(1)
+        data = rng.standard_normal((_CHANNELS, _SAMPLES)).astype(np.float32)
+        self.processed = rectify(butter_bandpass(data))
+
+    def test_rms_shape(self):
+        self.assertEqual(rms(self.processed).shape, (_CHANNELS, 1))
+
+    def test_mav_shape(self):
+        self.assertEqual(mav(self.processed).shape, (_CHANNELS, 1))
+
+    def test_integrated_emg_shape(self):
+        self.assertEqual(integrated_emg(self.processed).shape, (_CHANNELS, 1))
+
+    def test_rms_non_negative(self):
+        self.assertTrue(np.all(rms(self.processed) >= 0))
+
+    def test_mav_non_negative(self):
+        self.assertTrue(np.all(mav(self.processed) >= 0))
+
+    def test_integrated_emg_non_negative(self):
+        self.assertTrue(np.all(integrated_emg(self.processed) >= 0))
+
+
+if __name__ == '__main__':
+    unittest.main()

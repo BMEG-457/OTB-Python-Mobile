@@ -41,8 +41,15 @@ OTB-Python-Mobile/
 ├── scripts/
 │   └── compute_filter_coeffs.py   Offline scipy-based coefficient generator
 └── tests/
-    ├── test_networking.py    TCP smoke test (no device needed)
-    └── test_processing.py    Filter pipeline smoke test
+    ├── test_iir_filter.py        Pure-numpy IIR filter implementations
+    ├── test_filters.py           butter_bandpass, notch, rectify, live filters
+    ├── test_features.py          Basic EMG features and all post-session analyses
+    ├── test_pipeline.py          ProcessingPipeline and registry
+    ├── test_device.py            Command encoding, channel/frequency lookup, network check
+    ├── test_recording_manager.py Recording state, data capture, overflow, CSV export
+    ├── test_data_receiver.py     Packet parsing, stage dispatch, socket lifecycle
+    ├── test_networking.py        TCP server/client handshake (no device needed)
+    └── test_processing.py        End-to-end filter + feature pipeline (no device needed)
 ```
 
 ---
@@ -406,14 +413,41 @@ On desktop (non-Android): `~/OTB_EMG_Data/recordings/`
 
 ## 13. Testing
 
-No automated test framework. Two standalone smoke tests:
+The test suite uses the standard `unittest` framework and runs without device hardware or Kivy.
+
+### Run all tests
 
 ```bash
-python tests/test_networking.py    # TCP socket round-trip without hardware
-python tests/test_processing.py    # filter pipeline shape + non-negativity checks
+python -m unittest discover tests
 ```
 
-Run directly with `python`, not via pytest.
+### Run an individual module
+
+```bash
+python -m unittest tests.test_iir_filter
+python -m unittest tests.test_filters
+python -m unittest tests.test_features
+python -m unittest tests.test_pipeline
+python -m unittest tests.test_device
+python -m unittest tests.test_recording_manager
+python -m unittest tests.test_data_receiver
+python -m unittest tests.test_networking
+python -m unittest tests.test_processing
+```
+
+### Test coverage summary
+
+| File | Classes | What is tested |
+|---|---|---|
+| `test_iir_filter.py` | 5 | `lfilter`, `filtfilt`, `find_peaks`, `resample_signal`, `StatefulIIRFilter` |
+| `test_filters.py` | 4 | `butter_bandpass`, `notch`, `rectify`, live filter init/reset/isolation |
+| `test_features.py` | 8 | `rms`, `mav`, `integrated_emg`, `median_frequency_window`, `_preprocess_timestamps`, TKEO, burst, bilateral symmetry, fatigue, centroid shift, spatial non-uniformity |
+| `test_pipeline.py` | 2 | `ProcessingPipeline` stage execution, named registry isolation |
+| `test_device.py` | 5 | Channel/frequency lookup, command bit encoding, network check, `send_command`, `start_server` |
+| `test_recording_manager.py` | 5 | State machine, 64-channel capture, relative timestamps, overflow, CSV header and row count |
+| `test_data_receiver.py` | 4 | Packet byte decoding, stage dispatch gated by `running`, timeout survival, split-packet reassembly |
+| `test_networking.py` | 2 | Loopback TCP handshake, connection timeout, `stop_server` cleanup |
+| `test_processing.py` | 2 | Full filter pipeline shape/non-negativity on 72-channel data |
 
 ---
 

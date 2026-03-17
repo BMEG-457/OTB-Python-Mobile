@@ -1,10 +1,9 @@
-"""Phase 8.3 — networking smoke test.
+"""Unit tests for TCP server/client handshake in app/core/device.py.
 
-Starts the TCP server and connects a fake client to verify the socket
-handshake works correctly without needing the real device.
-
-Run from mobile app/:
-    python tests/test_networking.py
+Verifies the socket accept handshake using a local loopback fake client.
+No real device or WiFi required.
+Run with:
+    python -m unittest tests.test_networking
 """
 
 import sys
@@ -14,44 +13,99 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import socket
 import threading
 import time
-from unittest.mock import patch
+import unittest
+from unittest.mock import patch, MagicMock
 
 from app.core.device import SessantaquattroPlus
 
+_HOST = '127.0.0.1'
+_PORT = 45460   # offset from default to avoid conflicts with other tests
 
-def fake_device_client(host, port, delay=0.3):
-    """Simulate the Sessantaquattro+ connecting after a short delay."""
+
+def _fake_client(host, port, delay=0.1):
+    """Connect to host:port after a short delay, then disconnect."""
     time.sleep(delay)
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         s.connect((host, port))
-        print(f"[FakeDevice] Connected to {host}:{port}")
-        time.sleep(0.1)
     finally:
         s.close()
-        print("[FakeDevice] Disconnected")
 
 
-device = SessantaquattroPlus(host='127.0.0.1', port=45454)
+class TestTCPHandshake(unittest.TestCase):
 
-# Patch the network check so we don't need to be on the device's WiFi
-with patch.object(device, 'is_connected_to_device_network', return_value=True):
-    # Start the fake device client in background
-    client_thread = threading.Thread(
-        target=fake_device_client,
-        args=('127.0.0.1', 45454),
-        daemon=True,
-    )
-    client_thread.start()
+    def setUp(self):
+        self.dev = SessantaquattroPlus(host=_HOST, port=_PORT)
 
-    # start_server() should accept the fake client within 5 seconds
-    try:
-        device.start_server(connection_timeout=5)
-        print("Server accepted connection OK")
-    except ConnectionError as e:
-        print(f"FAILED: {e}")
-        sys.exit(1)
-    finally:
-        device.stop_server()
+    def tearDown(self):
+        self.dev.stop_server()
 
-print("Networking test PASSED")
+    def test_server_accepts_client_connection(self):
+        """start_server() should return without error when a client connects."""
+        t = threading.Thread(
+            target=_fake_client, args=(_HOST, _PORT), daemon=True
+        )
+        with patch.object(self.dev, 'is_connected_to_device_network', return_value=True):
+            t.start()
+            try:
+                self.dev.start_server(connection_timeout=5)
+            except ConnectionError as e:
+                self.fail(f"start_server raised ConnectionError unexpectedly: {e}")
+
+    def test_client_socket_set_after_connect(self):
+        t = threading.Thread(
+            target=_fake_client, args=(_HOST, _PORT), daemon=True
+        )
+        with patch.object(self.dev, 'is_connected_to_device_network', return_value=True):
+            t.start()
+            self.dev.start_server(connection_timeout=5)
+        self.assertIsNotNone(self.dev.client_socket)
+
+    def test_raises_connection_error_when_not_on_wifi(self):
+        with patch.object(self.dev, 'is_connected_to_device_network', return_value=False):
+            with self.assertRaises(ConnectionError):
+                self.dev.start_server(connection_timeout=1)
+
+    def test_raises_connection_error_on_timeout(self):
+        # Use a different port so no client ever connects
+        dev2 = SessantaquattroPlus(host=_HOST, port=_PORT + 1)
+        with patch.object(dev2, 'is_connected_to_device_network', return_value=True):
+            with self.assertRaises(ConnectionError):
+                dev2.start_server(connection_timeout=1)
+        dev2.stop_server()
+
+    def test_stop_server_clears_sockets(self):
+        t = threading.Thread(
+            target=_fake_client, args=(_HOST, _PORT), daemon=True
+        )
+        with patch.object(self.dev, 'is_connected_to_device_network', return_value=True):
+            t.start()
+            self.dev.start_server(connection_timeout=5)
+        self.dev.stop_server()
+        self.assertIsNone(self.dev.client_socket)
+        self.assertIsNone(self.dev.server_socket)
+
+
+class TestCommandSend(unittest.TestCase):
+
+    def test_send_command_writes_2_bytes(self):
+        dev = SessantaquattroPlus(host=_HOST, port=_PORT)
+        mock_sock = MagicMock()
+        dev.client_socket = mock_sock
+        cmd = dev.create_command()
+        dev.send_command(cmd)
+        mock_sock.send.assert_called_once()
+        sent = mock_sock.send.call_args[0][0]
+        self.assertEqual(len(sent), 2)
+
+    def test_send_command_raises_on_broken_socket(self):
+        dev = SessantaquattroPlus(host=_HOST, port=_PORT)
+        mock_sock = MagicMock()
+        mock_sock.send.side_effect = OSError("broken pipe")
+        dev.client_socket = mock_sock
+        with self.assertRaises(Exception):
+            dev.send_command(dev.create_command())
+
+
+if __name__ == '__main__':
+    unittest.main()

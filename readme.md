@@ -76,7 +76,9 @@ app/
   ui/screens/           SelectionScreen, LiveDataScreen, DataAnalysisScreen, AnalysisPlotScreen
   ui/widgets/           EMGPlotWidget, MultiTrackPlotWidget, HeatmapWidget, CalibrationPopup
 scripts/                compute_filter_coeffs.py (offline, desktop only)
-tests/                  test_networking.py, test_processing.py
+tests/                  test_iir_filter.py, test_filters.py, test_features.py,
+                        test_pipeline.py, test_device.py, test_recording_manager.py,
+                        test_data_receiver.py, test_networking.py, test_processing.py
 bin/                    Pre-built APK
 docs/                   All documentation
 ```
@@ -86,6 +88,17 @@ docs/                   All documentation
 ## Tests
 
 ```bash
-python tests/test_networking.py
-python tests/test_processing.py
+# Run full suite (no device or Kivy required)
+python -m unittest discover tests
+
+# Run individual modules
+python -m unittest tests.test_iir_filter
+python -m unittest tests.test_filters
+python -m unittest tests.test_features
+python -m unittest tests.test_pipeline
+python -m unittest tests.test_device
+python -m unittest tests.test_recording_manager
+python -m unittest tests.test_data_receiver
+python -m unittest tests.test_networking
+python -m unittest tests.test_processing
 ```
