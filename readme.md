@@ -63,11 +63,37 @@ Build (WSL2): `buildozer`, `openjdk-17-jdk`, `cython3`
 
 ---
 
+## CI / CD
+
+Two GitHub Actions workflows are defined in [`.github/workflows/`](.github/workflows/).
+
+### `ci.yml` — runs automatically
+
+Triggered on every push to `main` or `dev` and on every pull request targeting `main`.
+
+- Runs the full unit test suite against Python 3.10, 3.11, and 3.12 in parallel.
+- Only requires `numpy` — no Kivy or device hardware needed.
+- All jobs must pass before a PR can be merged.
+
+### `build-apk.yml` — manual trigger only
+
+Triggered from the **Actions** tab → **Build APK** → **Run workflow**.
+
+- Patches the local WSL2 `build_dir` path in `buildozer.spec` to a CI-safe path before building.
+- Builds inside the official `kivy/buildozer` Docker image (no WSL2 on the runner).
+- Caches the Android SDK/NDK between runs (keyed on `buildozer.spec`) — first run takes ~20–40 min; subsequent runs are faster.
+- Uploads the resulting APK as a downloadable workflow artifact (retained for 30 days).
+
+---
+
 ## Project Structure
 
 ```
 main.py                 Entry point (Kivy App, ScreenManager)
 buildozer.spec          Android build config
+.github/workflows/
+  ci.yml                Unit tests on push/PR (Python 3.10–3.12)
+  build-apk.yml         Manual APK build via Buildozer Docker image
 app/
   core/                 Config, device TCP protocol, path resolution
   data/                 DataReceiverThread (TCP recv loop, pipeline dispatch)
