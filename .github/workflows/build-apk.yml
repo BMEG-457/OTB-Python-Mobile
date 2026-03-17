@@ -1,0 +1,67 @@
+name: Build APK
+
+# Triggered manually from the GitHub Actions tab.
+# The build uses the official Buildozer Docker image so no WSL2 is needed.
+# Runtime: ~20-40 min on first run (downloads Android SDK/NDK); faster after caching.
+on:
+  workflow_dispatch:
+    inputs:
+      upload_artifact:
+        description: "Upload APK as workflow artifact"
+        required: false
+        default: "true"
+        type: boolean
+
+jobs:
+  build:
+    name: Buildozer Android debug
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Override the local WSL2 build_dir path in buildozer.spec before building.
+      # The CI filesystem does not have /home/fettuccinifelix, so we redirect to
+      # a path inside the runner's workspace.
+      - name: Patch buildozer.spec build_dir for CI
+        run: |
+          sed -i 's|^build_dir\s*=.*|build_dir = /home/runner/.buildozer_ci|' buildozer.spec
+
+      # Cache the Buildozer global directory (~/.buildozer) to avoid re-downloading
+      # the Android SDK, NDK, and Python bootstrap on every run.
+      - name: Cache Buildozer global directory
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.buildozer_ci
+          key: buildozer-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-
+
+      # Run buildozer inside the official kivy/buildozer Docker image.
+      # The container is granted write access to the workspace and cache paths.
+      - name: Build with Buildozer
+        uses: docker://kivy/buildozer:latest
+        with:
+          entrypoint: /bin/sh
+          args: >-
+            -c "
+            cd /github/workspace &&
+            HOME=/home/runner buildozer android debug
+            "
+        env:
+          HOME: /home/runner
+
+      - name: Locate APK
+        id: find_apk
+        run: |
+          apk=$(find bin -name "*.apk" | head -1)
+          echo "apk_path=$apk" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        if: ${{ inputs.upload_artifact == 'true' && steps.find_apk.outputs.apk_path != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: otbemgapp-debug
+          path: ${{ steps.find_apk.outputs.apk_path }}
+          retention-days: 30
