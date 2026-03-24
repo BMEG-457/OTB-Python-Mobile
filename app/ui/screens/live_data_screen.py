@@ -18,6 +18,7 @@ from app.managers.recording_manager import RecordingManager
 from app.managers.streaming_controller import StreamingController
 from app.processing.pipeline import get_pipeline
 from app.processing import filters
+from app.processing.iir_filter import StatefulIIRFilter
 from app.ui.widgets.emg_plot_widget import EMGPlotWidget
 from app.ui.widgets.multi_track_plot import MultiTrackPlotWidget
 from app.ui.widgets.heatmap_widget import HeatmapWidget
@@ -117,6 +118,10 @@ class LiveDataScreen(Screen):
         # Per-channel rolling buffers for heatmap RMS computation
         self._heatmap_buffer = np.zeros((CFG.HDSEMG_CHANNELS, CFG.HEATMAP_BUFFER_SAMPLES))
         self._heatmap_buf_idx = 0
+
+        # Auto MAV channel selection + envelope
+        self._auto_mav_channel = 0
+        self._envelope_pending = None  # (samples,) envelope for selected channel
 
         # Mode: 'basic' (clinical) or 'advanced' (researcher)
         self._mode = 'advanced'
@@ -341,6 +346,11 @@ class LiveDataScreen(Screen):
         get_pipeline('final').add_stage(lambda data: filters._live_notch_final(data))
         get_pipeline('final').add_stage(filters.rectify)
 
+        # Envelope lowpass filter for Auto MAV (all 64 channels to avoid stale state)
+        self._envelope_filter = StatefulIIRFilter(
+            CFG.LOWPASS_10_4_B, CFG.LOWPASS_10_4_A, n_channels=CFG.HDSEMG_CHANNELS
+        )
+
     # ------------------------------------------------------------------
     # Tab switching
     # ------------------------------------------------------------------
@@ -384,8 +394,12 @@ class LiveDataScreen(Screen):
 
     def _on_cycle_view(self, instance):
         self._view_mode_idx = (self._view_mode_idx + 1) % len(self._view_modes)
-        label, n_tracks, _ = self._view_modes[self._view_mode_idx]
+        label, n_tracks, agg = self._view_modes[self._view_mode_idx]
         self.btn_view_mode.text = f'View: {label}'
+
+        # Restore channel_index when switching from Auto MAV to single-channel
+        if n_tracks == 1 and agg is None:
+            self.plot_single.channel_index = self._single_channel_idx
 
         # Rebuild multi-track widget if track count changed
         if n_tracks > 1:
@@ -578,6 +592,7 @@ class LiveDataScreen(Screen):
 
     def _on_connected(self, dt):
         filters.reset_live_filters()
+        self._envelope_filter.reset()
         self.receiver_thread = DataReceiverThread(
             device=self.device,
             client_socket=self.device.client_socket,
@@ -641,6 +656,14 @@ class LiveDataScreen(Screen):
         if stage == 'final':
             self._pending_data = data.copy()
 
+            # Auto MAV: select channel with highest MAV, compute envelope
+            if data.shape[0] >= CFG.HDSEMG_CHANNELS:
+                hd = data[:CFG.HDSEMG_CHANNELS]
+                mav_values = np.mean(np.abs(hd), axis=1)
+                self._auto_mav_channel = int(np.argmax(mav_values))
+                envelope = self._envelope_filter(np.abs(hd))
+                self._envelope_pending = envelope[self._auto_mav_channel]
+
             # Contraction detection — store state for _ui_tick to read (no schedule_once)
             if self.is_calibrated and self.threshold is not None:
                 ch0_rms = float(np.sqrt(np.mean(data[0] ** 2)))
@@ -670,10 +693,14 @@ class LiveDataScreen(Screen):
     def _render_plot_panel(self, data):
         label, n_tracks, agg_fn = self._view_modes[self._view_mode_idx]
         if agg_fn == 'auto_mav':
-            # Auto MAV placeholder — will be fully implemented in Feature 1
-            # For now, display channel 0 as a fallback
-            self.plot_single.update(data)
-            self.plot_single.render()
+            envelope = self._envelope_pending
+            if envelope is not None:
+                # Feed envelope as a single-channel (1, samples) array at channel 0
+                self.plot_single.channel_index = 0
+                self.plot_single.update(envelope[np.newaxis, :])
+                self.plot_single.render()
+                ch = self._auto_mav_channel
+                self.btn_view_mode.text = f'View: Auto MAV: Ch{ch + 1}'
         elif n_tracks == 1:
             self.plot_single.update(data)
             self.plot_single.render()
@@ -713,6 +740,14 @@ class LiveDataScreen(Screen):
             normalized = rms / peak if peak > 0 else rms
 
         self.heatmap.update(normalized)
+
+        # Show highlight on auto MAV channel in Basic mode (always) or
+        # Advanced mode (only when Auto MAV view is active)
+        _, _, agg = self._view_modes[self._view_mode_idx]
+        if self._mode == 'basic' or agg == 'auto_mav':
+            self.heatmap.set_highlight(self._auto_mav_channel)
+        else:
+            self.heatmap.clear_highlight()
 
     def _update_contraction(self, text, color):
         self.contraction_label.text = text
