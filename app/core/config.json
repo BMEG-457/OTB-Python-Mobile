@@ -1,6 +1,6 @@
 {
   "build": {
-    "emulator_build": true
+    "emulator_build": false
   },
 
   "device": {

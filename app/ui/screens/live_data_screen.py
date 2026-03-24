@@ -64,9 +64,15 @@ def _cluster_aggregates(data):
     return np.array(result)
 
 
-# View mode definitions: (label, num_tracks, aggregation_fn or None)
-_VIEW_MODES = [
+# View mode definitions: (label, num_tracks, aggregation_fn_or_sentinel)
+# 'auto_mav' sentinel in 3rd position triggers auto-channel MAV envelope view
+_VIEW_MODES_BASIC = [
+    ('Auto MAV', 1, 'auto_mav'),
+]
+
+_VIEW_MODES_ADVANCED = [
     ('Single Ch1', 1,  None),
+    ('Auto MAV',   1,  'auto_mav'),
     ('Rows (8)',   8,  _row_aggregates),
     ('Cols (8)',   8,  _col_aggregates),
     ('Clusters',   16, _cluster_aggregates),
@@ -112,7 +118,11 @@ class LiveDataScreen(Screen):
         self._heatmap_buffer = np.zeros((CFG.HDSEMG_CHANNELS, CFG.HEATMAP_BUFFER_SAMPLES))
         self._heatmap_buf_idx = 0
 
-        # View mode index into _VIEW_MODES
+        # Mode: 'basic' (clinical) or 'advanced' (researcher)
+        self._mode = 'advanced'
+        self._view_modes = list(_VIEW_MODES_ADVANCED)
+
+        # View mode index into self._view_modes
         self._view_mode_idx = 0
 
         # Channel selector state (single-channel mode)
@@ -130,6 +140,44 @@ class LiveDataScreen(Screen):
 
     def on_leave(self):
         self._stop_battery_poll()
+
+    # ------------------------------------------------------------------
+    # Basic / Advanced mode
+    # ------------------------------------------------------------------
+
+    def set_mode(self, mode):
+        """Set 'basic' or 'advanced' mode and update UI visibility."""
+        self._mode = mode
+        if mode == 'basic':
+            self._view_modes = list(_VIEW_MODES_BASIC)
+        else:
+            self._view_modes = list(_VIEW_MODES_ADVANCED)
+        self._view_mode_idx = 0
+        self._apply_mode()
+
+    def _apply_mode(self):
+        """Show/hide UI elements based on current mode."""
+        label = self._view_modes[self._view_mode_idx][0]
+        self.btn_view_mode.text = f'View: {label}'
+
+        if self._mode == 'basic':
+            # Hide channel selector, time window, and view mode cycle button
+            self._set_ch_bar_visible(False)
+            self.btn_time_window.opacity = 0
+            self.btn_time_window.disabled = True
+            self.btn_view_mode.opacity = 0
+            self.btn_view_mode.disabled = True
+        else:
+            # Show all controls
+            self.btn_time_window.opacity = 1
+            self.btn_time_window.disabled = False
+            self.btn_view_mode.opacity = 1
+            self.btn_view_mode.disabled = False
+            self._update_ch_bar_visibility()
+
+        # Ensure correct plot widget is shown
+        if self._active_tab == 'plot':
+            self._show_active_plot_widget()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -231,7 +279,7 @@ class LiveDataScreen(Screen):
         tab_bar.add_widget(self._ch_bar)
 
         self.btn_view_mode = Button(
-            text=f'View: {_VIEW_MODES[0][0]}', size_hint=(0.28, 1), font_size=sp(14),
+            text=f'View: {self._view_modes[0][0]}', size_hint=(0.28, 1), font_size=sp(14),
         )
         self.btn_view_mode.bind(on_press=self._on_cycle_view)
         tab_bar.add_widget(self.btn_view_mode)
@@ -322,7 +370,7 @@ class LiveDataScreen(Screen):
 
     def _show_active_plot_widget(self):
         """Show the correct plot widget for the current view mode."""
-        label, n_tracks, _ = _VIEW_MODES[self._view_mode_idx]
+        label, n_tracks, _ = self._view_modes[self._view_mode_idx]
         if n_tracks == 1:
             self.plot_single.opacity = 1
             self.plot_multi.opacity = 0
@@ -335,8 +383,8 @@ class LiveDataScreen(Screen):
     # ------------------------------------------------------------------
 
     def _on_cycle_view(self, instance):
-        self._view_mode_idx = (self._view_mode_idx + 1) % len(_VIEW_MODES)
-        label, n_tracks, _ = _VIEW_MODES[self._view_mode_idx]
+        self._view_mode_idx = (self._view_mode_idx + 1) % len(self._view_modes)
+        label, n_tracks, _ = self._view_modes[self._view_mode_idx]
         self.btn_view_mode.text = f'View: {label}'
 
         # Rebuild multi-track widget if track count changed
@@ -394,7 +442,7 @@ class LiveDataScreen(Screen):
         self._content.add_widget(self.plot_single)
 
         # Rebuild multi-track plot with current view mode labels
-        label, n_tracks, _ = _VIEW_MODES[self._view_mode_idx]
+        label, n_tracks, _ = self._view_modes[self._view_mode_idx]
         self._rebuild_multi_track(label, max(n_tracks, 8))
 
         # Restore correct visibility
@@ -425,14 +473,18 @@ class LiveDataScreen(Screen):
         ch = self._single_channel_idx
         self.plot_single.channel_index = ch
         self.plot_single.reset_scale()
-        _VIEW_MODES[0] = (f'Single Ch{ch + 1}', 1, None)
-        if self._view_mode_idx == 0:
-            self.btn_view_mode.text = f'View: Single Ch{ch + 1}'
+        # Update the Single Ch entry label in advanced view modes
+        for i, (label, n, agg) in enumerate(self._view_modes):
+            if n == 1 and agg is None:
+                self._view_modes[i] = (f'Single Ch{ch + 1}', 1, None)
+                if self._view_mode_idx == i:
+                    self.btn_view_mode.text = f'View: Single Ch{ch + 1}'
+                break
 
     def _update_ch_bar_visibility(self):
-        """Show channel bar only when in single-channel view mode."""
-        _, n_tracks, _ = _VIEW_MODES[self._view_mode_idx]
-        self._set_ch_bar_visible(n_tracks == 1)
+        """Show channel bar only in single-channel view (not Auto MAV)."""
+        _, n_tracks, agg = self._view_modes[self._view_mode_idx]
+        self._set_ch_bar_visible(n_tracks == 1 and agg != 'auto_mav')
 
     def _set_ch_bar_visible(self, visible):
         self._ch_bar.opacity = 1 if visible else 0
@@ -616,8 +668,13 @@ class LiveDataScreen(Screen):
             self._render_heatmap_panel(data)
 
     def _render_plot_panel(self, data):
-        label, n_tracks, agg_fn = _VIEW_MODES[self._view_mode_idx]
-        if n_tracks == 1:
+        label, n_tracks, agg_fn = self._view_modes[self._view_mode_idx]
+        if agg_fn == 'auto_mav':
+            # Auto MAV placeholder — will be fully implemented in Feature 1
+            # For now, display channel 0 as a fallback
+            self.plot_single.update(data)
+            self.plot_single.render()
+        elif n_tracks == 1:
             self.plot_single.update(data)
             self.plot_single.render()
         else:

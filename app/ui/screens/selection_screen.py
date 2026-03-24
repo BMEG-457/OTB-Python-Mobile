@@ -2,6 +2,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.metrics import sp
 from app.core import config as CFG
 
@@ -48,7 +49,50 @@ class SelectionScreen(Screen):
         self.add_widget(layout)
 
     def _go_live(self, instance):
-        self.manager.current = 'live_data'
+        content = BoxLayout(orientation='vertical', padding=20, spacing=16)
+
+        content.add_widget(Label(
+            text='Select a viewing mode:',
+            font_size=sp(18),
+            size_hint=(1, 0.3),
+        ))
+
+        btn_basic = Button(
+            text='Basic (Clinical)',
+            font_size=sp(18),
+            size_hint=(1, 0.35),
+            background_color=CFG.BTN_LIVE_MODE,
+        )
+        btn_advanced = Button(
+            text='Advanced (Researcher)',
+            font_size=sp(18),
+            size_hint=(1, 0.35),
+            background_color=CFG.BTN_ANALYSIS_MODE,
+        )
+
+        content.add_widget(btn_basic)
+        content.add_widget(btn_advanced)
+
+        popup = Popup(
+            title='Live Data Mode',
+            content=content,
+            size_hint=(0.7, 0.45),
+            auto_dismiss=True,
+        )
+
+        def on_basic(inst):
+            popup.dismiss()
+            self.manager.get_screen('live_data').set_mode('basic')
+            self.manager.current = 'live_data'
+
+        def on_advanced(inst):
+            popup.dismiss()
+            self.manager.get_screen('live_data').set_mode('advanced')
+            self.manager.current = 'live_data'
+
+        btn_basic.bind(on_press=on_basic)
+        btn_advanced.bind(on_press=on_advanced)
+        popup.open()
 
     def _go_analysis(self, instance):
         self.manager.current = 'data_analysis'
