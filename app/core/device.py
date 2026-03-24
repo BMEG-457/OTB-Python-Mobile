@@ -103,6 +103,8 @@ class SessantaquattroPlus:
                     "Ensure the device is powered on and in pairing mode."
                 )
 
+        except ConnectionError:
+            raise
         except socket.error as e:
             if self.server_socket:
                 self.server_socket.close()
