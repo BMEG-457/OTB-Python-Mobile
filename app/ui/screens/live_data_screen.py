@@ -18,10 +18,13 @@ from app.managers.recording_manager import RecordingManager
 from app.managers.streaming_controller import StreamingController
 from app.processing.pipeline import get_pipeline
 from app.processing import filters
+from app.processing.iir_filter import StatefulIIRFilter
+from app.processing.live_metrics import LiveMetricsComputer
 from app.ui.widgets.emg_plot_widget import EMGPlotWidget
 from app.ui.widgets.multi_track_plot import MultiTrackPlotWidget
 from app.ui.widgets.heatmap_widget import HeatmapWidget
 from app.ui.widgets.calibration_popup import CalibrationPopup
+from app.ui.widgets.session_metadata_popup import SessionMetadataPopup
 from app.core import config as CFG
 
 
@@ -64,9 +67,15 @@ def _cluster_aggregates(data):
     return np.array(result)
 
 
-# View mode definitions: (label, num_tracks, aggregation_fn or None)
-_VIEW_MODES = [
+# View mode definitions: (label, num_tracks, aggregation_fn_or_sentinel)
+# 'auto_mav' sentinel in 3rd position triggers auto-channel MAV envelope view
+_VIEW_MODES_BASIC = [
+    ('Auto MAV', 1, 'auto_mav'),
+]
+
+_VIEW_MODES_ADVANCED = [
     ('Single Ch1', 1,  None),
+    ('Auto MAV',   1,  'auto_mav'),
     ('Rows (8)',   8,  _row_aggregates),
     ('Cols (8)',   8,  _col_aggregates),
     ('Clusters',   16, _cluster_aggregates),
@@ -112,7 +121,19 @@ class LiveDataScreen(Screen):
         self._heatmap_buffer = np.zeros((CFG.HDSEMG_CHANNELS, CFG.HEATMAP_BUFFER_SAMPLES))
         self._heatmap_buf_idx = 0
 
-        # View mode index into _VIEW_MODES
+        # Auto MAV channel selection + envelope
+        self._auto_mav_channel = 0
+        self._envelope_pending = None  # (samples,) envelope for selected channel
+
+        # Real-time metrics
+        self._metrics_computer = LiveMetricsComputer()
+        self._pending_metrics = None
+
+        # Mode: 'basic' (clinical) or 'advanced' (researcher)
+        self._mode = 'advanced'
+        self._view_modes = list(_VIEW_MODES_ADVANCED)
+
+        # View mode index into self._view_modes
         self._view_mode_idx = 0
 
         # Channel selector state (single-channel mode)
@@ -130,6 +151,44 @@ class LiveDataScreen(Screen):
 
     def on_leave(self):
         self._stop_battery_poll()
+
+    # ------------------------------------------------------------------
+    # Basic / Advanced mode
+    # ------------------------------------------------------------------
+
+    def set_mode(self, mode):
+        """Set 'basic' or 'advanced' mode and update UI visibility."""
+        self._mode = mode
+        if mode == 'basic':
+            self._view_modes = list(_VIEW_MODES_BASIC)
+        else:
+            self._view_modes = list(_VIEW_MODES_ADVANCED)
+        self._view_mode_idx = 0
+        self._apply_mode()
+
+    def _apply_mode(self):
+        """Show/hide UI elements based on current mode."""
+        label = self._view_modes[self._view_mode_idx][0]
+        self.btn_view_mode.text = f'View: {label}'
+
+        if self._mode == 'basic':
+            # Hide channel selector, time window, and view mode cycle button
+            self._set_ch_bar_visible(False)
+            self.btn_time_window.opacity = 0
+            self.btn_time_window.disabled = True
+            self.btn_view_mode.opacity = 0
+            self.btn_view_mode.disabled = True
+        else:
+            # Show all controls
+            self.btn_time_window.opacity = 1
+            self.btn_time_window.disabled = False
+            self.btn_view_mode.opacity = 1
+            self.btn_view_mode.disabled = False
+            self._update_ch_bar_visibility()
+
+        # Ensure correct plot widget is shown
+        if self._active_tab == 'plot':
+            self._show_active_plot_widget()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -231,7 +290,7 @@ class LiveDataScreen(Screen):
         tab_bar.add_widget(self._ch_bar)
 
         self.btn_view_mode = Button(
-            text=f'View: {_VIEW_MODES[0][0]}', size_hint=(0.28, 1), font_size=sp(14),
+            text=f'View: {self._view_modes[0][0]}', size_hint=(0.28, 1), font_size=sp(14),
         )
         self.btn_view_mode.bind(on_press=self._on_cycle_view)
         tab_bar.add_widget(self.btn_view_mode)
@@ -239,7 +298,7 @@ class LiveDataScreen(Screen):
         root.add_widget(tab_bar)
 
         # ---- Content area (FloatLayout to overlay panels) ----
-        self._content = FloatLayout(size_hint=(1, 0.78))
+        self._content = FloatLayout(size_hint=(1, 0.70))
 
         # Single-channel plot (default view)
         tw = CFG.PLOT_TIME_WINDOW_PRESETS[self._time_window_idx]
@@ -270,6 +329,32 @@ class LiveDataScreen(Screen):
 
         root.add_widget(self._content)
 
+        # ---- Metrics bar ----
+        self._metrics_bar = BoxLayout(
+            orientation='horizontal', size_hint=(1, 0.08), padding=4, spacing=8
+        )
+        self._lbl_rms = Label(
+            text='RMS: --', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
+            size_hint=(0.25, 1),
+        )
+        self._lbl_mf = Label(
+            text='MF: -- Hz', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
+            size_hint=(0.25, 1),
+        )
+        self._lbl_fatigue = Label(
+            text='Fatigue: --', font_size=sp(14), color=(0.5, 0.5, 0.5, 1),
+            size_hint=(0.25, 1),
+        )
+        self._lbl_active_ch = Label(
+            text='Ch: --', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
+            size_hint=(0.25, 1),
+        )
+        self._metrics_bar.add_widget(self._lbl_rms)
+        self._metrics_bar.add_widget(self._lbl_mf)
+        self._metrics_bar.add_widget(self._lbl_fatigue)
+        self._metrics_bar.add_widget(self._lbl_active_ch)
+        root.add_widget(self._metrics_bar)
+
         # ---- Bottom status bar ----
         self.bottom_label = Label(
             text='Press "Start Stream" to connect to the device.',
@@ -292,6 +377,11 @@ class LiveDataScreen(Screen):
         get_pipeline('final').add_stage(lambda data: filters._live_bp_final(data))
         get_pipeline('final').add_stage(lambda data: filters._live_notch_final(data))
         get_pipeline('final').add_stage(filters.rectify)
+
+        # Envelope lowpass filter for Auto MAV (all 64 channels to avoid stale state)
+        self._envelope_filter = StatefulIIRFilter(
+            CFG.LOWPASS_10_4_B, CFG.LOWPASS_10_4_A, n_channels=CFG.HDSEMG_CHANNELS
+        )
 
     # ------------------------------------------------------------------
     # Tab switching
@@ -322,7 +412,7 @@ class LiveDataScreen(Screen):
 
     def _show_active_plot_widget(self):
         """Show the correct plot widget for the current view mode."""
-        label, n_tracks, _ = _VIEW_MODES[self._view_mode_idx]
+        label, n_tracks, _ = self._view_modes[self._view_mode_idx]
         if n_tracks == 1:
             self.plot_single.opacity = 1
             self.plot_multi.opacity = 0
@@ -335,9 +425,13 @@ class LiveDataScreen(Screen):
     # ------------------------------------------------------------------
 
     def _on_cycle_view(self, instance):
-        self._view_mode_idx = (self._view_mode_idx + 1) % len(_VIEW_MODES)
-        label, n_tracks, _ = _VIEW_MODES[self._view_mode_idx]
+        self._view_mode_idx = (self._view_mode_idx + 1) % len(self._view_modes)
+        label, n_tracks, agg = self._view_modes[self._view_mode_idx]
         self.btn_view_mode.text = f'View: {label}'
+
+        # Restore channel_index when switching from Auto MAV to single-channel
+        if n_tracks == 1 and agg is None:
+            self.plot_single.channel_index = self._single_channel_idx
 
         # Rebuild multi-track widget if track count changed
         if n_tracks > 1:
@@ -394,7 +488,7 @@ class LiveDataScreen(Screen):
         self._content.add_widget(self.plot_single)
 
         # Rebuild multi-track plot with current view mode labels
-        label, n_tracks, _ = _VIEW_MODES[self._view_mode_idx]
+        label, n_tracks, _ = self._view_modes[self._view_mode_idx]
         self._rebuild_multi_track(label, max(n_tracks, 8))
 
         # Restore correct visibility
@@ -425,14 +519,18 @@ class LiveDataScreen(Screen):
         ch = self._single_channel_idx
         self.plot_single.channel_index = ch
         self.plot_single.reset_scale()
-        _VIEW_MODES[0] = (f'Single Ch{ch + 1}', 1, None)
-        if self._view_mode_idx == 0:
-            self.btn_view_mode.text = f'View: Single Ch{ch + 1}'
+        # Update the Single Ch entry label in advanced view modes
+        for i, (label, n, agg) in enumerate(self._view_modes):
+            if n == 1 and agg is None:
+                self._view_modes[i] = (f'Single Ch{ch + 1}', 1, None)
+                if self._view_mode_idx == i:
+                    self.btn_view_mode.text = f'View: Single Ch{ch + 1}'
+                break
 
     def _update_ch_bar_visibility(self):
-        """Show channel bar only when in single-channel view mode."""
-        _, n_tracks, _ = _VIEW_MODES[self._view_mode_idx]
-        self._set_ch_bar_visible(n_tracks == 1)
+        """Show channel bar only in single-channel view (not Auto MAV)."""
+        _, n_tracks, agg = self._view_modes[self._view_mode_idx]
+        self._set_ch_bar_visible(n_tracks == 1 and agg != 'auto_mav')
 
     def _set_ch_bar_visible(self, visible):
         self._ch_bar.opacity = 1 if visible else 0
@@ -526,6 +624,9 @@ class LiveDataScreen(Screen):
 
     def _on_connected(self, dt):
         filters.reset_live_filters()
+        self._envelope_filter.reset()
+        self._metrics_computer.reset()
+        self._pending_metrics = None
         self.receiver_thread = DataReceiverThread(
             device=self.device,
             client_socket=self.device.client_socket,
@@ -589,6 +690,21 @@ class LiveDataScreen(Screen):
         if stage == 'final':
             self._pending_data = data.copy()
 
+            # Auto MAV: select channel with highest MAV, compute envelope
+            if data.shape[0] >= CFG.HDSEMG_CHANNELS:
+                hd = data[:CFG.HDSEMG_CHANNELS]
+                mav_values = np.mean(np.abs(hd), axis=1)
+                self._auto_mav_channel = int(np.argmax(mav_values))
+                envelope = self._envelope_filter(np.abs(hd))
+                self._envelope_pending = envelope[self._auto_mav_channel]
+
+            # Feed active channel samples to metrics computer
+            active_ch = self._get_active_channel_index()
+            if active_ch < data.shape[0]:
+                result = self._metrics_computer.update(data[active_ch])
+                if result is not None:
+                    self._pending_metrics = result
+
             # Contraction detection — store state for _ui_tick to read (no schedule_once)
             if self.is_calibrated and self.threshold is not None:
                 ch0_rms = float(np.sqrt(np.mean(data[0] ** 2)))
@@ -610,14 +726,33 @@ class LiveDataScreen(Screen):
         self.contraction_label.text = self._contraction_text
         self.contraction_label.color = self._contraction_color
 
+        # Update metrics bar
+        m = self._pending_metrics
+        if m is not None:
+            self._lbl_rms.text = f'RMS: {m["rms"]:.1f}'
+            self._lbl_mf.text = f'MF: {m["median_freq"]:.1f} Hz'
+            fatigue = m['fatigue_rms'] or m['fatigue_mf']
+            self._lbl_fatigue.text = 'Fatigue: YES' if fatigue else 'Fatigue: No'
+            self._lbl_fatigue.color = (1, 0.3, 0.3, 1) if fatigue else (0.3, 1, 0.3, 1)
+            self._lbl_active_ch.text = f'Ch: {self._get_active_channel_index() + 1}'
+
         if self._active_tab == 'plot':
             self._render_plot_panel(data)
         else:
             self._render_heatmap_panel(data)
 
     def _render_plot_panel(self, data):
-        label, n_tracks, agg_fn = _VIEW_MODES[self._view_mode_idx]
-        if n_tracks == 1:
+        label, n_tracks, agg_fn = self._view_modes[self._view_mode_idx]
+        if agg_fn == 'auto_mav':
+            envelope = self._envelope_pending
+            if envelope is not None:
+                # Feed envelope as a single-channel (1, samples) array at channel 0
+                self.plot_single.channel_index = 0
+                self.plot_single.update(envelope[np.newaxis, :])
+                self.plot_single.render()
+                ch = self._auto_mav_channel
+                self.btn_view_mode.text = f'View: Auto MAV: Ch{ch + 1}'
+        elif n_tracks == 1:
             self.plot_single.update(data)
             self.plot_single.render()
         else:
@@ -657,9 +792,26 @@ class LiveDataScreen(Screen):
 
         self.heatmap.update(normalized)
 
+        # Show highlight on auto MAV channel in Basic mode (always) or
+        # Advanced mode (only when Auto MAV view is active)
+        _, _, agg = self._view_modes[self._view_mode_idx]
+        if self._mode == 'basic' or agg == 'auto_mav':
+            self.heatmap.set_highlight(self._auto_mav_channel)
+        else:
+            self.heatmap.clear_highlight()
+
     def _update_contraction(self, text, color):
         self.contraction_label.text = text
         self.contraction_label.color = color
+
+    def _get_active_channel_index(self):
+        """Return the channel index currently being displayed."""
+        _, n_tracks, agg = self._view_modes[self._view_mode_idx]
+        if agg == 'auto_mav':
+            return self._auto_mav_channel
+        if n_tracks == 1:
+            return self._single_channel_idx
+        return 0
 
     # ------------------------------------------------------------------
     # Calibration
@@ -689,6 +841,10 @@ class LiveDataScreen(Screen):
         self.mvc_rms = mvc_rms
         self.is_calibrated = True
         self.btn_record.disabled = False
+        # Pass baseline RMS of active channel to metrics computer
+        active_ch = self._get_active_channel_index()
+        if baseline_rms is not None and active_ch < len(baseline_rms):
+            self._metrics_computer.set_baseline(float(baseline_rms[active_ch]))
         self._set_bottom('Calibration complete.')
         self._set_status('Calibrated')
 
@@ -703,6 +859,18 @@ class LiveDataScreen(Screen):
             self._start_recording()
 
     def _start_recording(self):
+        popup = SessionMetadataPopup(on_confirm=self._on_metadata_confirmed)
+        popup.open()
+
+    def _on_metadata_confirmed(self, metadata):
+        # Include calibration info if available
+        if self.is_calibrated and self.baseline_rms is not None:
+            metadata['calibration'] = {
+                'baseline_rms': self.baseline_rms.tolist(),
+                'mvc_rms': self.mvc_rms.tolist() if self.mvc_rms is not None else None,
+                'threshold_means': self.threshold.tolist() if self.threshold is not None else None,
+            }
+        self.recording_manager.set_metadata(metadata)
         self.recording_manager.start_recording()
         self.btn_record.text = 'Stop Record'
         self.btn_record.background_color = CFG.BTN_RECORD_SAVING

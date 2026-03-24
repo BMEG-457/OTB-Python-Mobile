@@ -125,6 +125,10 @@ FPS_LOG_INTERVAL    = _raw['data_receiver']['fps_log_interval']
 # -- Recording -----------------------------------------------------------------
 RECORDING_MAX_SAMPLES = _raw['recording']['max_samples']
 
+# -- Session metadata ----------------------------------------------------------
+SESSION_MUSCLE_GROUPS  = _raw['session']['muscle_groups']
+SESSION_EXERCISE_TYPES = _raw['session']['exercise_types']
+
 # -- Paths ---------------------------------------------------------------------
 ANDROID_PACKAGE_NAME   = _raw['paths']['android_package_name']
 DATA_DIR_NAME          = _raw['paths']['data_dir_name']

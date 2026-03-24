@@ -2,6 +2,7 @@
 
 import csv
 from datetime import datetime
+import json
 import os
 import time
 
@@ -27,6 +28,11 @@ class RecordingManager:
         self.is_recording = False
         self.on_overflow = on_overflow
         self.on_status = on_status
+        self.session_metadata = None
+
+    def set_metadata(self, metadata):
+        """Set session metadata dict to be saved alongside the recording."""
+        self.session_metadata = metadata
 
     def start_recording(self):
         """Start recording data."""
@@ -107,6 +113,24 @@ class RecordingManager:
                     writer.writerow(row)
 
             num_samples = len(self.recording_data)
+
+            # Save JSON sidecar with metadata if available
+            if self.session_metadata is not None:
+                duration = self.recording_data[-1][0] if num_samples > 0 else 0.0
+                sidecar = {
+                    **self.session_metadata,
+                    'recording_file': os.path.basename(filename),
+                    'num_samples': num_samples,
+                    'num_channels': num_channels,
+                    'sample_rate': CFG.DEVICE_SAMPLE_RATE,
+                    'duration_sec': round(duration, 3),
+                    'saved_at': datetime.now().isoformat(),
+                }
+                meta_filename = filename.replace('.csv', '_meta.json')
+                with open(meta_filename, 'w') as mf:
+                    json.dump(sidecar, mf, indent=2)
+                self.session_metadata = None
+
             message = f"Recording saved: {filename} ({num_samples} samples)"
             print(message)
 
