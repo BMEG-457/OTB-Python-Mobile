@@ -155,6 +155,10 @@
     "exercise_types": ["Isometric MVC", "Dynamic Contraction", "Fatigue Protocol", "Free Movement", "Other"]
   },
 
+  "longitudinal": {
+    "max_sessions": 200
+  },
+
   "paths": {
     "android_package_name": "org.bmeg457.otbemgapp",
     "data_dir_name": "OTB_EMG",

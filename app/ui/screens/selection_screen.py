@@ -31,7 +31,7 @@ class SelectionScreen(Screen):
         btn_live = Button(
             text='Live Data Viewing',
             font_size=sp(20),
-            size_hint=(1, 0.25),
+            size_hint=(1, 0.20),
             background_color=CFG.BTN_LIVE_MODE,
         )
         btn_live.bind(on_press=self._go_live)
@@ -40,11 +40,20 @@ class SelectionScreen(Screen):
         btn_analysis = Button(
             text='Data Analysis',
             font_size=sp(20),
-            size_hint=(1, 0.25),
+            size_hint=(1, 0.20),
             background_color=CFG.BTN_ANALYSIS_MODE,
         )
         btn_analysis.bind(on_press=self._go_analysis)
         layout.add_widget(btn_analysis)
+
+        btn_history = Button(
+            text='Session History',
+            font_size=sp(20),
+            size_hint=(1, 0.20),
+            background_color=(0.5, 0.35, 0.7, 1.0),
+        )
+        btn_history.bind(on_press=self._go_history)
+        layout.add_widget(btn_history)
 
         self.add_widget(layout)
 
@@ -96,3 +105,6 @@ class SelectionScreen(Screen):
 
     def _go_analysis(self, instance):
         self.manager.current = 'data_analysis'
+
+    def _go_history(self, instance):
+        self.manager.current = 'longitudinal'

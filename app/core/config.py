@@ -129,6 +129,9 @@ RECORDING_MAX_SAMPLES = _raw['recording']['max_samples']
 SESSION_MUSCLE_GROUPS  = _raw['session']['muscle_groups']
 SESSION_EXERCISE_TYPES = _raw['session']['exercise_types']
 
+# -- Longitudinal tracking -----------------------------------------------------
+LONGITUDINAL_MAX_SESSIONS = _raw['longitudinal']['max_sessions']
+
 # -- Paths ---------------------------------------------------------------------
 ANDROID_PACKAGE_NAME   = _raw['paths']['android_package_name']
 DATA_DIR_NAME          = _raw['paths']['data_dir_name']

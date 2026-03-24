@@ -8,6 +8,7 @@ import time
 
 from app.core.paths import get_recordings_dir
 from app.core import config as CFG
+from app.managers.session_history import SessionHistoryManager
 
 
 class RecordingManager:
@@ -29,6 +30,7 @@ class RecordingManager:
         self.on_overflow = on_overflow
         self.on_status = on_status
         self.session_metadata = None
+        self._session_history = SessionHistoryManager()
 
     def set_metadata(self, metadata):
         """Set session metadata dict to be saved alongside the recording."""
@@ -114,11 +116,12 @@ class RecordingManager:
 
             num_samples = len(self.recording_data)
 
-            # Save JSON sidecar with metadata if available
-            if self.session_metadata is not None:
+            # Save JSON sidecar and session summary if metadata available
+            metadata = self.session_metadata
+            if metadata is not None:
                 duration = self.recording_data[-1][0] if num_samples > 0 else 0.0
                 sidecar = {
-                    **self.session_metadata,
+                    **metadata,
                     'recording_file': os.path.basename(filename),
                     'num_samples': num_samples,
                     'num_channels': num_channels,
@@ -129,6 +132,17 @@ class RecordingManager:
                 meta_filename = filename.replace('.csv', '_meta.json')
                 with open(meta_filename, 'w') as mf:
                     json.dump(sidecar, mf, indent=2)
+
+                # Compute and append session summary for longitudinal tracking
+                cal_info = metadata.get('calibration')
+                try:
+                    summary = SessionHistoryManager.compute_session_summary(
+                        self.recording_data, metadata, cal_info
+                    )
+                    self._session_history.append_session(summary)
+                except Exception as e:
+                    print(f"[RECORDING] Session summary error: {e}")
+
                 self.session_metadata = None
 
             message = f"Recording saved: {filename} ({num_samples} samples)"
