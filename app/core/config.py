@@ -132,6 +132,13 @@ SESSION_EXERCISE_TYPES = _raw['session']['exercise_types']
 # -- Longitudinal tracking -----------------------------------------------------
 LONGITUDINAL_MAX_SESSIONS = _raw['longitudinal']['max_sessions']
 
+# -- Safety --------------------------------------------------------------------
+LATENCY_WARNING_MS          = _raw['safety']['latency_warning_threshold_ms']
+LATENCY_ROLLING_WINDOW      = _raw['safety']['latency_rolling_window']
+DISCONNECT_WARNING_SEC      = _raw['safety']['disconnect_warning_sec']
+ADC_RAIL_VALUE              = _raw['safety']['adc_rail_value']
+CLIPPING_FRACTION_THRESHOLD = _raw['safety']['clipping_fraction_threshold']
+
 # -- Paths ---------------------------------------------------------------------
 ANDROID_PACKAGE_NAME   = _raw['paths']['android_package_name']
 DATA_DIR_NAME          = _raw['paths']['data_dir_name']

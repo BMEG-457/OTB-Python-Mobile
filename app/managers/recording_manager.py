@@ -32,26 +32,54 @@ class RecordingManager:
         self.session_metadata = None
         self._session_history = SessionHistoryManager()
 
+        # Autosave state
+        self._autosave_file = None
+        self._autosave_writer = None
+        self._autosave_path = None
+        self._sample_count = 0
+
     def set_metadata(self, metadata):
         """Set session metadata dict to be saved alongside the recording."""
         self.session_metadata = metadata
 
     def start_recording(self):
-        """Start recording data."""
+        """Start recording data with write-through autosave."""
         self.recording_data = []
         self.recording_start_time = time.time()
         self.is_recording = True
-        print("[RECORDING] Recording started — waiting for data...")
+        self._sample_count = 0
+
+        # Open autosave temp file for crash recovery
+        try:
+            recordings_dir = get_recordings_dir()
+            os.makedirs(recordings_dir, exist_ok=True)
+            ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._autosave_path = os.path.join(recordings_dir, f"_autosave_{ts_str}.csv")
+            self._autosave_file = open(self._autosave_path, 'w', newline='')
+            self._autosave_writer = csv.writer(self._autosave_file)
+            header = ['Timestamp'] + [f'Channel_{i+1}' for i in range(CFG.HDSEMG_CHANNELS)]
+            self._autosave_writer.writerow(header)
+            self._autosave_file.flush()
+        except Exception as e:
+            print(f"[RECORDING] WARNING: Could not open autosave file: {e}")
+            self._autosave_file = None
+            self._autosave_writer = None
+            self._autosave_path = None
+
+        print("[RECORDING] Recording started with autosave — waiting for data...")
         return True
 
     def stop_recording(self):
         """Stop recording data."""
-        print(f"[RECORDING] Recording stopped — collected {len(self.recording_data)} samples")
+        print(f"[RECORDING] Recording stopped — {self._sample_count} samples on disk")
         self.is_recording = False
         return True
 
     def on_data_for_recording(self, stage_name, data):
         """Capture raw stage data from the receiver thread.
+
+        Data is both kept in memory (for session summary) and written through
+        to the autosave CSV on disk (for crash recovery with ≤5s data loss).
 
         Args:
             stage_name: Processing stage name ('raw', 'filtered', 'rectified', 'final').
@@ -64,7 +92,7 @@ class RecordingManager:
             return
 
         try:
-            if len(self.recording_data) >= self.max_recording_samples:
+            if self._sample_count >= self.max_recording_samples:
                 if self.on_overflow:
                     self.on_overflow()
                 return
@@ -72,18 +100,29 @@ class RecordingManager:
             num_samples = data.shape[1]
             current_time = time.time()
 
-            if len(self.recording_data) == 0:
+            if self._sample_count == 0:
                 print(f"[RECORDING] First data received! Shape: {data.shape}, samples: {num_samples}")
 
             for sample_idx in range(num_samples):
                 timestamp = current_time - self.recording_start_time
                 sample_data = data[:CFG.HDSEMG_CHANNELS, sample_idx].copy()
                 self.recording_data.append((timestamp, sample_data))
+                self._sample_count += 1
 
-                if len(self.recording_data) >= self.max_recording_samples:
+                # Write through to autosave file
+                if self._autosave_writer is not None:
+                    self._autosave_writer.writerow(
+                        [timestamp] + sample_data.tolist()
+                    )
+
+                if self._sample_count >= self.max_recording_samples:
                     if self.on_overflow:
                         self.on_overflow()
                     break
+
+            # Flush to disk periodically (OS buffering handles the rest)
+            if self._autosave_file is not None:
+                self._autosave_file.flush()
 
         except Exception as e:
             print(f"[RECORDING] Error collecting data: {e}")
@@ -91,10 +130,14 @@ class RecordingManager:
     def save_recording_to_csv(self):
         """Save recorded data to CSV file.
 
+        If an autosave file exists, it is closed and renamed to the final
+        filename. Otherwise falls back to writing from the in-memory buffer.
+
         Returns:
             tuple: (success: bool, message: str, filename: str or None)
         """
-        if not self.recording_data:
+        if self._sample_count == 0 and not self.recording_data:
+            self._close_autosave(delete=True)
             return False, "No data recorded", None
 
         try:
@@ -104,22 +147,32 @@ class RecordingManager:
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = os.path.join(recordings_dir, f"recording_{timestamp_str}.csv")
 
-            num_channels = len(self.recording_data[0][1])
+            # Close autosave file and rename to final path
+            if self._autosave_file is not None:
+                self._autosave_file.close()
+                self._autosave_file = None
 
-            with open(filename, 'w', newline='') as csvfile:
-                writer = csv.writer(csvfile)
-                header = ['Timestamp'] + [f'Channel_{i+1}' for i in range(num_channels)]
-                writer.writerow(header)
-                for timestamp, channel_data in self.recording_data:
-                    row = [timestamp] + channel_data.tolist()
-                    writer.writerow(row)
+            if self._autosave_path and os.path.exists(self._autosave_path):
+                os.rename(self._autosave_path, filename)
+                self._autosave_path = None
+            else:
+                # Fallback: write from in-memory buffer
+                num_channels = len(self.recording_data[0][1])
+                with open(filename, 'w', newline='') as csvfile:
+                    writer = csv.writer(csvfile)
+                    header = ['Timestamp'] + [f'Channel_{i+1}' for i in range(num_channels)]
+                    writer.writerow(header)
+                    for timestamp, channel_data in self.recording_data:
+                        row = [timestamp] + channel_data.tolist()
+                        writer.writerow(row)
 
-            num_samples = len(self.recording_data)
+            num_samples = self._sample_count or len(self.recording_data)
+            num_channels = CFG.HDSEMG_CHANNELS
 
             # Save JSON sidecar and session summary if metadata available
             metadata = self.session_metadata
             if metadata is not None:
-                duration = self.recording_data[-1][0] if num_samples > 0 else 0.0
+                duration = self.recording_data[-1][0] if self.recording_data else 0.0
                 sidecar = {
                     **metadata,
                     'recording_file': os.path.basename(filename),
@@ -150,6 +203,7 @@ class RecordingManager:
 
             self.recording_data = []
             self.recording_start_time = None
+            self._sample_count = 0
 
             return True, message, filename
 
@@ -158,10 +212,22 @@ class RecordingManager:
             print(error_msg)
             return False, error_msg, None
 
+    def _close_autosave(self, delete=False):
+        """Close the autosave file handle and optionally delete the temp file."""
+        if self._autosave_file is not None:
+            self._autosave_file.close()
+            self._autosave_file = None
+        self._autosave_writer = None
+        if delete and self._autosave_path and os.path.exists(self._autosave_path):
+            os.remove(self._autosave_path)
+        self._autosave_path = None
+
     def clear_recording_data(self):
-        """Clear all recorded data from memory."""
+        """Clear all recorded data from memory and close autosave."""
+        self._close_autosave(delete=True)
         self.recording_data = []
         self.recording_start_time = None
+        self._sample_count = 0
 
     def get_recording_info(self):
         """Return dict with recording status information."""
@@ -169,8 +235,31 @@ class RecordingManager:
         if self.recording_start_time is not None:
             duration = time.time() - self.recording_start_time
         return {
-            'num_samples': len(self.recording_data),
+            'num_samples': self._sample_count,
             'duration': duration,
             'is_recording': self.is_recording,
             'max_samples': self.max_recording_samples,
         }
+
+    @staticmethod
+    def find_orphaned_autosaves():
+        """Find autosave files left behind by a crash."""
+        recordings_dir = get_recordings_dir()
+        if not os.path.exists(recordings_dir):
+            return []
+        return [f for f in os.listdir(recordings_dir)
+                if f.startswith('_autosave_') and f.endswith('.csv')]
+
+    @staticmethod
+    def recover_autosave(filename):
+        """Rename an orphaned autosave to a recovered recording file.
+
+        Returns:
+            Path to the recovered file.
+        """
+        recordings_dir = get_recordings_dir()
+        src = os.path.join(recordings_dir, filename)
+        ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dst = os.path.join(recordings_dir, f"recovered_{ts_str}.csv")
+        os.rename(src, dst)
+        return dst

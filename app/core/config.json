@@ -159,6 +159,14 @@
     "max_sessions": 200
   },
 
+  "safety": {
+    "latency_warning_threshold_ms": 100,
+    "latency_rolling_window": 10,
+    "disconnect_warning_sec": 5,
+    "adc_rail_value": 32767,
+    "clipping_fraction_threshold": 0.01
+  },
+
   "paths": {
     "android_package_name": "org.bmeg457.otbemgapp",
     "data_dir_name": "OTB_EMG",
