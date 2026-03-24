@@ -2,8 +2,9 @@
 
 import numpy as np
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Line, Rectangle, Ellipse
+from kivy.graphics import Color, Line, Rectangle, Ellipse, PushMatrix, PopMatrix, Rotate
 from kivy.core.text import Label as CoreLabel
+from kivy.metrics import sp
 
 
 class TrendPlotWidget(Widget):
@@ -40,7 +41,7 @@ class TrendPlotWidget(Widget):
         if self.width <= 0 or self.height <= 0:
             return
 
-        pad_l, pad_r, pad_b, pad_t = 60, 20, 40, 30
+        pad_l, pad_r, pad_b, pad_t = int(sp(60)), int(sp(15)), int(sp(40)), int(sp(20))
         plot_x = self.x + pad_l
         plot_y = self.y + pad_b
         plot_w = self.width - pad_l - pad_r
@@ -59,7 +60,7 @@ class TrendPlotWidget(Widget):
         if n == 0:
             # Empty state label
             self._draw_text('No session data', self.center_x, self.center_y,
-                            color=(0.5, 0.5, 0.5, 1), font_size=16)
+                            color=(0.5, 0.5, 0.5, 1), font_size=sp(14))
             return
 
         y_vals = np.array(self._y_values, dtype=float)
@@ -103,7 +104,7 @@ class TrendPlotWidget(Widget):
         for val, frac in [(y_min, 0), ((y_min + y_max) / 2, 0.5), (y_max, 1.0)]:
             ly = plot_y + frac * plot_h
             self._draw_text(f'{val:.1f}', plot_x - 8, ly,
-                            anchor_x='right', font_size=11)
+                            anchor_x='right', font_size=sp(13))
 
         # X-axis labels (show first, last, and up to 3 in between)
         if n <= 5:
@@ -119,12 +120,22 @@ class TrendPlotWidget(Widget):
             if len(label) > 5:
                 label = label[5:]  # strip year prefix e.g. "2026-" -> "03-01"
             self._draw_text(label, xs_px[i], plot_y - 6,
-                            anchor_y='top', font_size=10)
+                            anchor_y='top', font_size=sp(13))
 
-        # Y-axis title
+        # Y-axis title (rotated 90° so it reads bottom-to-top)
         if self._y_label:
-            self._draw_text(self._y_label, self.x + 8, self.center_y,
-                            font_size=12, color=(0.7, 0.7, 0.7, 1))
+            label = CoreLabel(text=str(self._y_label), font_size=sp(14))
+            label.refresh()
+            tex = label.texture
+            tw, th = tex.size
+            cx = self.x + th / 2 + 4
+            cy = plot_y + plot_h / 2
+            with self.canvas:
+                Color(0.7, 0.7, 0.7, 1)
+                PushMatrix()
+                Rotate(angle=90, origin=(cx, cy))
+                Rectangle(texture=tex, pos=(cx - tw / 2, cy - th / 2), size=(tw, th))
+                PopMatrix()
 
     def _draw_text(self, text, x, y, anchor_x='center', anchor_y='middle',
                    font_size=14, color=(0.8, 0.8, 0.8, 1)):

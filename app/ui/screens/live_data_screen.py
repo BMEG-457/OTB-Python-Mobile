@@ -12,7 +12,7 @@ from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.clock import Clock
-from kivy.metrics import sp
+from kivy.metrics import dp, sp
 
 from app.data.data_receiver import DataReceiverThread
 from app.managers.recording_manager import RecordingManager
@@ -114,11 +114,10 @@ class LiveDataScreen(Screen):
 
         self._calibration_extra_callback = None
 
-        # Latest raw (72-ch) data arriving from receiver — read in _ui_tick
-        self._pending_data = None
+        # Accumulated packets from receiver — list of (channels, samples) arrays
+        self._pending_packets = []
 
-        # Contraction state set by receiver thread, read by _ui_tick (no Clock.schedule_once)
-        self._contraction_text = 'No Contraction'
+        # Contraction state — computed in _ui_tick
         self._contraction_color = CFG.CONTRACTION_INACTIVE
 
         # Per-channel rolling buffers for heatmap RMS computation
@@ -127,10 +126,13 @@ class LiveDataScreen(Screen):
 
         # Auto MAV channel selection + envelope
         self._auto_mav_channel = 0
-        self._envelope_pending = None  # (samples,) envelope for selected channel
 
         # Latency monitoring
         self._latency_window = []
+
+        # Debug diagnostics (output via print → logcat)
+        self._tick_count = 0
+        self._last_tick_time = time.time()
 
         # Clipping detection
         self._clipping_detector = ClippingDetector()
@@ -212,71 +214,71 @@ class LiveDataScreen(Screen):
     # ------------------------------------------------------------------
 
     def _build_ui(self):
-        root = BoxLayout(orientation='vertical')
+        root = BoxLayout(orientation='vertical', padding=dp(8))
 
         # ---- Top bar ----
         top_bar = BoxLayout(
             orientation='horizontal', size_hint=(1, 0.10), padding=4, spacing=4
         )
 
-        btn_back = Button(text='Back', size_hint=(0.08, 1), font_size=sp(15))
+        btn_back = Button(text='Back', size_hint=(0.07, 1), font_size=sp(14))
         btn_back.bind(on_press=self._go_back)
         top_bar.add_widget(btn_back)
 
         self.btn_calibrate = Button(
-            text='Calibrate', size_hint=(0.10, 1), font_size=sp(15)
+            text='Calibrate', size_hint=(0.09, 1), font_size=sp(14)
         )
         self.btn_calibrate.bind(on_press=self._on_calibrate)
         self.btn_calibrate.disabled = True
         top_bar.add_widget(self.btn_calibrate)
 
-        btn_guide = Button(text='Guide', size_hint=(0.08, 1), font_size=sp(15))
+        btn_guide = Button(text='Guide', size_hint=(0.07, 1), font_size=sp(14))
         btn_guide.bind(on_press=lambda x: SENIAMGuidePopup().open())
         top_bar.add_widget(btn_guide)
 
         self.btn_crosstalk = Button(
-            text='Crosstalk', size_hint=(0.10, 1), font_size=sp(14)
+            text='Crosstalk', size_hint=(0.09, 1), font_size=sp(13)
         )
         self.btn_crosstalk.bind(on_press=self._on_crosstalk)
         self.btn_crosstalk.disabled = True
         top_bar.add_widget(self.btn_crosstalk)
 
         self.btn_stream = Button(
-            text='Start Stream', size_hint=(0.13, 1),
-            font_size=sp(15), background_color=CFG.BTN_STREAM_IDLE
+            text='Stream', size_hint=(0.08, 1),
+            font_size=sp(14), background_color=CFG.BTN_STREAM_IDLE
         )
         self.btn_stream.bind(on_press=self._on_toggle_stream)
         top_bar.add_widget(self.btn_stream)
 
         self.btn_record = Button(
-            text='Start Record', size_hint=(0.15, 1),
-            font_size=sp(15), background_color=CFG.BTN_RECORD_IDLE
+            text='Record', size_hint=(0.08, 1),
+            font_size=sp(14), background_color=CFG.BTN_RECORD_IDLE
         )
         self.btn_record.bind(on_press=self._on_toggle_record)
         self.btn_record.disabled = True
         top_bar.add_widget(self.btn_record)
 
         self.contraction_label = Label(
-            text='No Contraction', color=CFG.CONTRACTION_INACTIVE,
-            size_hint=(0.17, 1), font_size=sp(15),
+            text='Contraction', color=CFG.CONTRACTION_INACTIVE,
+            size_hint_x=None, width=dp(80), font_size=sp(12),
         )
         top_bar.add_widget(self.contraction_label)
 
         self.battery_label = Label(
-            text='Battery: --', color=(0.5, 0.5, 0.5, 1),
-            size_hint=(0.12, 1), font_size=sp(14),
+            text='Bat: --', color=(0.5, 0.5, 0.5, 1),
+            size_hint_x=None, width=dp(65), font_size=sp(12),
         )
         top_bar.add_widget(self.battery_label)
 
         self.latency_label = Label(
             text='Lat: --', color=(0.5, 0.5, 0.5, 1),
-            size_hint=(0.08, 1), font_size=sp(14),
+            size_hint_x=None, width=dp(55), font_size=sp(12),
         )
         top_bar.add_widget(self.latency_label)
 
         self.status_label = Label(
             text='Not connected', color=(0.7, 0.7, 0.7, 1),
-            size_hint=(0.12, 1), font_size=sp(14),
+            size_hint_x=None, width=dp(85), font_size=sp(12),
         )
         top_bar.add_widget(self.status_label)
 
@@ -403,7 +405,7 @@ class LiveDataScreen(Screen):
 
         # ---- Bottom status bar ----
         self.bottom_label = Label(
-            text='Press "Start Stream" to connect to the device.',
+            text='Press "Stream" to connect to the device.',
             font_size=sp(14), color=(0.6, 0.6, 0.6, 1),
             size_hint=(1, 0.05),
         )
@@ -417,7 +419,7 @@ class LiveDataScreen(Screen):
     def _configure_pipelines(self):
         # Stateful causal IIR filters — vectorized across channels, forward-only
         # (no filtfilt). Separate bandpass instances per pipeline to avoid shared state.
-        filters.init_live_filters(CFG.DEVICE_CHANNELS)
+        filters.init_live_filters(CFG.HDSEMG_CHANNELS)
         get_pipeline('filtered').add_stage(lambda data: filters._live_bp_filtered(data))
         get_pipeline('rectified').add_stage(filters.rectify)
         get_pipeline('final').add_stage(lambda data: filters._live_bp_final(data))
@@ -435,10 +437,11 @@ class LiveDataScreen(Screen):
 
     def _on_tab_plot(self, instance):
         self._active_tab = 'plot'
-        self.btn_view_mode.opacity = 1
-        self.btn_view_mode.disabled = False
-        self.btn_time_window.opacity = 1
-        self.btn_time_window.disabled = False
+        if self._mode != 'basic':
+            self.btn_view_mode.opacity = 1
+            self.btn_view_mode.disabled = False
+            self.btn_time_window.opacity = 1
+            self.btn_time_window.disabled = False
         self._update_ch_bar_visibility()
         # Show active plot, hide heatmap
         self._show_active_plot_widget()
@@ -607,7 +610,7 @@ class LiveDataScreen(Screen):
 
     def _update_battery_display(self, level):
         if level is None:
-            self.battery_label.text = 'Battery: --'
+            self.battery_label.text = 'Bat: --'
             self.battery_label.color = (0.5, 0.5, 0.5, 1)
         else:
             if level <= CFG.BATTERY_LOW_THRESHOLD:
@@ -616,7 +619,7 @@ class LiveDataScreen(Screen):
                 color = CFG.BATTERY_MED_COLOR
             else:
                 color = CFG.BATTERY_OK_COLOR
-            self.battery_label.text = f'Battery: {level}%'
+            self.battery_label.text = f'Bat: {level}%'
             self.battery_label.color = color
 
     # ------------------------------------------------------------------
@@ -698,7 +701,9 @@ class LiveDataScreen(Screen):
         self.plot_single.reset_scale()
         self.plot_multi.reset_scale()
         self.streaming_controller.start_streaming()
-        self.btn_stream.text = 'Stop Stream'
+        self.btn_stream.text = 'Stream'
+        self.btn_stream.background_color = CFG.BTN_STREAM_ACTIVE
+        self.btn_stream.color = (0.2, 1.0, 0.2, 1.0)
         self.btn_stream.disabled = False
         self.btn_calibrate.disabled = False
         self._set_status('Streaming...')
@@ -706,7 +711,9 @@ class LiveDataScreen(Screen):
 
     def _on_connect_error(self, message):
         self.device.stop_server()  # clean up sockets for next attempt
-        self.btn_stream.text = 'Start Stream'
+        self.btn_stream.text = 'Stream'
+        self.btn_stream.background_color = CFG.BTN_STREAM_IDLE
+        self.btn_stream.color = (1, 1, 1, 1)
         self.btn_stream.disabled = False
         self._set_status('Connection failed')
         self._set_bottom(f'Error: {message}')
@@ -714,7 +721,9 @@ class LiveDataScreen(Screen):
     def _stop_stream(self):
         if self.streaming_controller:
             self.streaming_controller.stop_streaming()
-        self.btn_stream.text = 'Start Stream'
+        self.btn_stream.text = 'Stream'
+        self.btn_stream.background_color = CFG.BTN_STREAM_IDLE
+        self.btn_stream.color = (1, 1, 1, 1)
         self.btn_calibrate.disabled = True
         self.btn_record.disabled = True
         self._set_status('Stream stopped')
@@ -735,7 +744,11 @@ class LiveDataScreen(Screen):
     # ------------------------------------------------------------------
 
     def _on_data(self, stage, data):
-        """Called by the receiver thread for every processed packet."""
+        """Called by the receiver thread for every processed packet.
+
+        Kept minimal to avoid slowing the receiver thread.  Heavy
+        computation (envelope, metrics, contraction) moved to _ui_tick.
+        """
         # Recording — forward raw data directly on the receiver thread
         self.recording_manager.on_data_for_recording(stage, data)
 
@@ -749,41 +762,29 @@ class LiveDataScreen(Screen):
         if self._calibration_extra_callback is not None:
             self._calibration_extra_callback(stage, data)
 
-        # Store latest data for the render tick (no Clock call needed)
+        # Accumulate final-stage packets for the UI tick (no overwrite)
         if stage == 'final':
-            self._pending_data = data.copy()
-
-            # Auto MAV: select channel with highest MAV, compute envelope
-            if data.shape[0] >= CFG.HDSEMG_CHANNELS:
-                hd = data[:CFG.HDSEMG_CHANNELS]
-                mav_values = np.mean(np.abs(hd), axis=1)
-                self._auto_mav_channel = int(np.argmax(mav_values))
-                envelope = self._envelope_filter(np.abs(hd))
-                self._envelope_pending = envelope[self._auto_mav_channel]
-
-            # Feed active channel samples to metrics computer
-            active_ch = self._get_active_channel_index()
-            if active_ch < data.shape[0]:
-                result = self._metrics_computer.update(data[active_ch])
-                if result is not None:
-                    self._pending_metrics = result
-
-            # Contraction detection — store state for _ui_tick to read (no schedule_once)
-            if self.is_calibrated and self.threshold is not None:
-                ch0_rms = float(np.sqrt(np.mean(data[0] ** 2)))
-                if ch0_rms > self.threshold[0]:
-                    self._contraction_text = 'Contraction'
-                    self._contraction_color = CFG.CONTRACTION_ACTIVE
-                else:
-                    self._contraction_text = 'No Contraction'
-                    self._contraction_color = CFG.CONTRACTION_INACTIVE
+            self._pending_packets.append(data)
 
     def _ui_tick(self, dt):
-        """30fps Kivy Clock tick — render active panel from latest data."""
-        data = self._pending_data
-        if data is None:
+        """30fps Kivy Clock tick — drain ALL accumulated packets and render."""
+        packets = self._pending_packets
+        if not packets:
             return
-        self._pending_data = None
+        self._pending_packets = []
+
+        # Concatenate all accumulated packets along sample axis
+        data = np.concatenate(packets, axis=1)
+
+        # Debug diagnostics — log every 30 frames (~1s) to logcat
+        self._tick_count += 1
+        if self._tick_count % 30 == 0:
+            now = time.time()
+            avg_dt = (now - self._last_tick_time) * 1000 / 30
+            self._last_tick_time = now
+            lat = self._latency_window[-1] if self._latency_window else 0
+            print(f"[DEBUG] ui_tick: pkts={len(packets)} samples={data.shape[1]} "
+                  f"avg_dt={avg_dt:.1f}ms lat={lat:.0f}ms")
 
         # Clear disconnect warning on data resume
         if self._disconnect_label.opacity > 0:
@@ -803,8 +804,34 @@ class LiveDataScreen(Screen):
             else:
                 self.latency_label.color = (0.3, 1, 0.3, 1)
 
-        # Update contraction label (reads state set by receiver thread)
-        self.contraction_label.text = self._contraction_text
+        # --- Computation moved here from receiver thread ---
+
+        # Auto MAV: envelope + channel selection
+        envelope_pending = None
+        if data.shape[0] >= CFG.HDSEMG_CHANNELS:
+            hd = data[:CFG.HDSEMG_CHANNELS]
+            if not self.is_calibrated:
+                mav_values = np.mean(np.abs(hd), axis=1)
+                self._auto_mav_channel = int(np.argmax(mav_values))
+            envelope = self._envelope_filter(np.abs(hd))
+            envelope_pending = envelope[self._auto_mav_channel]
+
+        # Metrics computation
+        active_ch = self._get_active_channel_index()
+        if active_ch < data.shape[0]:
+            result = self._metrics_computer.update(data[active_ch])
+            if result is not None:
+                self._pending_metrics = result
+
+        # Contraction detection
+        if self.is_calibrated and self.threshold is not None:
+            ch0_rms = float(np.sqrt(np.mean(data[0] ** 2)))
+            if ch0_rms > self.threshold[0]:
+                self._contraction_color = CFG.CONTRACTION_ACTIVE
+            else:
+                self._contraction_color = CFG.CONTRACTION_INACTIVE
+
+        # Update contraction label color
         self.contraction_label.color = self._contraction_color
 
         # Update metrics bar
@@ -826,14 +853,14 @@ class LiveDataScreen(Screen):
             self._lbl_clipping.text = ''
 
         if self._active_tab == 'plot':
-            self._render_plot_panel(data)
+            self._render_plot_panel(data, envelope_pending)
         else:
             self._render_heatmap_panel(data)
 
-    def _render_plot_panel(self, data):
+    def _render_plot_panel(self, data, envelope_pending=None):
         label, n_tracks, agg_fn = self._view_modes[self._view_mode_idx]
         if agg_fn == 'auto_mav':
-            envelope = self._envelope_pending
+            envelope = envelope_pending
             if envelope is not None:
                 # Feed envelope as a single-channel (1, samples) array at channel 0
                 self.plot_single.channel_index = 0
@@ -855,10 +882,15 @@ class LiveDataScreen(Screen):
     def _render_heatmap_panel(self, data):
         if data.shape[0] < CFG.HDSEMG_CHANNELS:
             return
+        if not self.is_calibrated or self.mvc_rms is None:
+            return
         # Accumulate samples into rolling buffer, compute per-channel RMS
-        n  = data.shape[1]
         hd = data[:CFG.HDSEMG_CHANNELS]
         buf_len = CFG.HEATMAP_BUFFER_SAMPLES
+        # When concatenated packets exceed buf_len, keep only the tail
+        if hd.shape[1] > buf_len:
+            hd = hd[:, -buf_len:]
+        n = hd.shape[1]
         # Vectorised circular-buffer write — replaces O(n) Python for-loop
         start = self._heatmap_buf_idx % buf_len
         if start + n <= buf_len:
@@ -871,13 +903,9 @@ class LiveDataScreen(Screen):
 
         rms = np.sqrt(np.mean(self._heatmap_buffer ** 2, axis=1))  # (64,)
 
-        if self.is_calibrated and self.mvc_rms is not None:
-            mvc = self.mvc_rms[:CFG.HDSEMG_CHANNELS]
-            mvc = np.where(mvc > 0, mvc, 1.0)
-            normalized = np.clip(rms / mvc, 0.0, 1.0)
-        else:
-            peak = rms.max()
-            normalized = rms / peak if peak > 0 else rms
+        mvc = self.mvc_rms[:CFG.HDSEMG_CHANNELS]
+        mvc = np.where(mvc > 0, mvc, 1.0)
+        normalized = np.clip(rms / mvc, 0.0, 1.0)
 
         self.heatmap.update(normalized)
 
@@ -889,8 +917,7 @@ class LiveDataScreen(Screen):
         else:
             self.heatmap.clear_highlight()
 
-    def _update_contraction(self, text, color):
-        self.contraction_label.text = text
+    def _update_contraction(self, color):
         self.contraction_label.color = color
 
     def _get_active_channel_index(self):
@@ -929,6 +956,10 @@ class LiveDataScreen(Screen):
         self.threshold = threshold
         self.mvc_rms = mvc_rms
         self.is_calibrated = True
+        # Lock auto MAV channel to the one with highest MAV from calibration
+        ref = mvc_rms if mvc_rms is not None else baseline_rms
+        if ref is not None:
+            self._auto_mav_channel = int(np.argmax(ref[:CFG.HDSEMG_CHANNELS]))
         self.btn_record.disabled = False
         self.btn_crosstalk.disabled = False
         # Pass baseline RMS of active channel to metrics computer
@@ -985,13 +1016,14 @@ class LiveDataScreen(Screen):
             }
         self.recording_manager.set_metadata(metadata)
         self.recording_manager.start_recording()
-        self.btn_record.text = 'Stop Record'
-        self.btn_record.background_color = CFG.BTN_RECORD_SAVING
+        self.btn_record.text = 'Record'
+        self.btn_record.background_color = CFG.BTN_RECORD_ACTIVE
+        self.btn_record.color = (1.0, 0.2, 0.2, 1.0)
         self._set_status('Recording...')
 
     def _stop_recording(self):
         self.recording_manager.stop_recording()
-        self.btn_record.text = 'Saving...'
+        self.btn_record.background_color = CFG.BTN_RECORD_SAVING
         self.btn_record.disabled = True
 
         def save():
@@ -1001,8 +1033,9 @@ class LiveDataScreen(Screen):
         threading.Thread(target=save, daemon=True).start()
 
     def _on_save_done(self, success, message):
-        self.btn_record.text = 'Start Record'
+        self.btn_record.text = 'Record'
         self.btn_record.background_color = CFG.BTN_RECORD_IDLE
+        self.btn_record.color = (1, 1, 1, 1)
         self.btn_record.disabled = False
         self._set_status('Saved' if success else 'Save failed')
         self._set_bottom(message)

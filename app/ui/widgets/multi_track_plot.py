@@ -42,6 +42,10 @@ class MultiTrackPlotWidget(Widget):
         self._buffers    = [np.zeros(cap) for _ in range(self._n)]
         self._buf_writes = [0] * self._n
 
+        # Display-aligned read pointers (advance in downsample multiples only)
+        self._display_reads    = [0] * self._n
+        self._samples_pendings = [0] * self._n
+
         # Pre-allocated linearisation scratch buffers (one per track)
         self._render_bufs = [np.empty(cap) for _ in range(self._n)]
 
@@ -116,6 +120,14 @@ class MultiTrackPlotWidget(Widget):
             self._buffers[idx][:n - split] = new[split:]
             self._buf_writes[idx]          = n - split
 
+        # Advance display read pointer in downsample-aligned steps only
+        ds = self._downsample
+        self._samples_pendings[idx] += n
+        steps = self._samples_pendings[idx] // ds
+        if steps > 0:
+            self._display_reads[idx] = (self._display_reads[idx] + steps * ds) % cap
+            self._samples_pendings[idx] -= steps * ds
+
     def reset_scale(self):
         """Reset peak-hold y-axis range for all tracks (call on stream start)."""
         for i in range(self._n):
@@ -139,16 +151,18 @@ class MultiTrackPlotWidget(Widget):
 
     def _draw_track(self, idx, y_base, track_h):
         cap = self._display_samples
-        w   = self._buf_writes[idx]
+        w   = self._display_reads[idx]
         buf = self._buffers[idx]
         rb  = self._render_bufs[idx]
         pts = self._pts_arrays[idx]
 
-        # Linearise circular buffer into pre-allocated scratch (no allocation)
+        # Linearise from display-aligned read pointer (not raw write pointer)
         rb[:cap - w] = buf[w:]
         rb[cap - w:] = buf[:w]
 
-        ds = rb[::self._downsample]  # view, no copy
+        # Anti-aliased decimation: block-average instead of naive skip
+        n_usable = self._n_pts * self._downsample
+        ds = rb[:n_usable].reshape(self._n_pts, self._downsample).mean(axis=1)
 
         # Expand peak-hold range (only grows, never shrinks)
         self._y_mins[idx] = min(self._y_mins[idx], ds.min())

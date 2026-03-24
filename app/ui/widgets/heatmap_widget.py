@@ -3,6 +3,7 @@
 import numpy as np
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle, Line
+from kivy.core.text import Label as CoreLabel
 from app.core import config as CFG
 
 
@@ -47,10 +48,31 @@ class HeatmapWidget(Widget):
                     self._cell_colors.append(c)
                     self._cell_rects.append(r)
 
+            # Grid lines
+            self._grid_color = Color(0.3, 0.3, 0.3, 1)
+            self._grid_lines = []
+            # Vertical lines (COLS - 1 inner + 2 outer = COLS + 1)
+            for _ in range(self.COLS + 1):
+                self._grid_lines.append(Line(points=[], width=1))
+            # Horizontal lines (ROWS + 1)
+            for _ in range(self.ROWS + 1):
+                self._grid_lines.append(Line(points=[], width=1))
+
+            # Channel number labels
+            self._label_colors = []
+            self._label_rects = []
+            for row in range(self.ROWS):
+                for col in range(self.COLS):
+                    lc = Color(1, 1, 1, 0.85)
+                    lr = Rectangle(pos=(0, 0), size=(1, 1))
+                    self._label_colors.append(lc)
+                    self._label_rects.append(lr)
+
             # Highlight overlay — drawn last so it renders on top
             self._highlight_color = Color(1, 1, 1, 0)  # white, alpha=0 (hidden)
             self._highlight_line = Line(ellipse=(0, 0, 1, 1), width=2)
 
+        self._label_textures = [None] * (self.ROWS * self.COLS)
         self.bind(pos=self._update_layout, size=self._update_layout)
 
     # ------------------------------------------------------------------
@@ -85,6 +107,7 @@ class HeatmapWidget(Widget):
         """Recompute cell positions and sizes when widget is resized/moved."""
         cell_w = self.width  / self.COLS
         cell_h = self.height / self.ROWS
+        font_size = max(10, int(min(cell_w, cell_h) * 0.3))
         for row in range(self.ROWS):
             for col in range(self.COLS):
                 idx = row * self.COLS + col
@@ -93,6 +116,33 @@ class HeatmapWidget(Widget):
                 y = self.y + (self.ROWS - 1 - row) * cell_h
                 self._cell_rects[idx].pos  = (x, y)
                 self._cell_rects[idx].size = (cell_w, cell_h)
+
+                # Channel number label
+                ch = _channel_idx(col, row)
+                label = CoreLabel(text=str(ch + 1), font_size=font_size,
+                                  color=(1, 1, 1, 0.85))
+                label.refresh()
+                tex = label.texture
+                self._label_textures[idx] = tex
+                self._label_rects[idx].texture = tex
+                tw, th = tex.size
+                self._label_rects[idx].size = (tw, th)
+                self._label_rects[idx].pos = (x + (cell_w - tw) / 2,
+                                              y + (cell_h - th) / 2)
+
+        # Grid lines
+        line_idx = 0
+        # Vertical lines
+        for c in range(self.COLS + 1):
+            lx = self.x + c * cell_w
+            self._grid_lines[line_idx].points = [lx, self.y, lx, self.y + self.height]
+            line_idx += 1
+        # Horizontal lines
+        for r in range(self.ROWS + 1):
+            ly = self.y + r * cell_h
+            self._grid_lines[line_idx].points = [self.x, ly, self.x + self.width, ly]
+            line_idx += 1
+
         self._redraw_colors()
         self._update_highlight_pos()
 

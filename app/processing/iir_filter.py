@@ -248,24 +248,56 @@ class StatefulIIRFilter:
         self.n_channels = n_channels
         self._z = np.zeros((n_channels, M), dtype=np.float64)
 
+        # Cached coefficient slices and pre-allocated work buffers
+        self._b_tail = self.b[1:M + 1].copy()    # shape (M,)
+        self._a_tail = self.a[1:M + 1].copy()    # shape (M,)
+        self._yi  = np.empty(n_channels, dtype=np.float64)
+        self._tmp = np.empty((n_channels, M), dtype=np.float64)
+
     def __call__(self, data):
-        """Filter data of shape (n_channels, n_samples). Returns same shape."""
-        n_samples = data.shape[1]
+        """Filter data of shape (n_channels, n_samples). Returns same shape.
+
+        Optimized for mobile ARM: one bulk dtype conversion, pre-allocated
+        work buffers, and the inner state-update loop replaced by a single
+        vectorized numpy outer-product operation per sample.
+        """
+        n_ch, n_samples = data.shape
         b = self.b
         a = self.a
         M = self.M
         z = self._z
-        out = np.empty_like(data, dtype=np.float32)
+        b0 = b[0]
+        b_tail = self._b_tail          # b[1:M+1], shape (M,) — cached at init
+        a_tail = self._a_tail          # a[1:M+1], shape (M,) — cached at init
+
+        # Single bulk cast (replaces 125 per-sample .astype() allocations)
+        x = np.ascontiguousarray(data.T, dtype=np.float64)   # (n_samples, n_ch)
+        out_T = np.empty_like(x)                               # (n_samples, n_ch)
+
+        # Pre-allocated work buffers (reused every iteration — zero allocations)
+        yi  = self._yi                 # (n_ch,)
+        tmp = self._tmp                # (n_ch, M) scratch for outer products
 
         for i in range(n_samples):
-            x_i = data[:, i].astype(np.float64)
-            y_i = b[0] * x_i + z[:, 0]
-            for j in range(M - 1):
-                z[:, j] = b[j + 1] * x_i - a[j + 1] * y_i + z[:, j + 1]
-            z[:, M - 1] = b[M] * x_i - a[M] * y_i
-            out[:, i] = y_i
+            xi = x[i]                  # row view — no copy
 
-        return out
+            # y = b0 * x + z[:, 0]
+            np.multiply(b0, xi, out=yi)
+            yi += z[:, 0]
+
+            # Vectorized state shift + coefficient update:
+            # z[:, j] = b[j+1]*x - a[j+1]*y + z[:, j+1]  for j < M-1
+            # z[:, M-1] = b[M]*x - a[M]*y
+            z[:, :-1] = z[:, 1:]
+            z[:, -1] = 0.0
+            np.outer(xi, b_tail, out=tmp)
+            z += tmp
+            np.outer(yi, a_tail, out=tmp)
+            z -= tmp
+
+            out_T[i] = yi
+
+        return out_T.T.astype(np.float32)
 
     def reset(self):
         """Zero filter state for a fresh streaming session."""

@@ -8,8 +8,9 @@ Built with Kivy and NumPy — no scipy at runtime.
 
 ## Modes
 
-- **Live Data** — stream and visualize 64-channel HD-sEMG in real time, calibrate against baseline/MVC, record sessions to CSV
+- **Live Data (Basic / Advanced)** — stream and visualize 64-channel HD-sEMG in real time, calibrate against baseline/MVC with verification, record sessions to CSV with metadata and autosave crash recovery. Basic (clinical) mode offers a simplified UI; Advanced (researcher) mode exposes all controls.
 - **Data Analysis** — load recorded CSV files and run TKEO activation timing, burst duration, fatigue detection, bilateral symmetry, centroid shift, and spatial non-uniformity analyses
+- **Session History** — view longitudinal trends across recording sessions, filter by subject or muscle group, and track metrics (peak RMS, median frequency, contraction count) over time
 
 ---
 
@@ -55,11 +56,12 @@ Build (WSL2): `buildozer`, `openjdk-17-jdk`, `cython3`
 
 | Document | Contents |
 |---|---|
-| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | App usage: connect, stream, calibrate, record, analyse |
-| [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | Architecture, screen interface, signal processing, threading, widgets |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | App usage: connect, stream, calibrate, record, analyse, session history |
+| [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | Architecture, screen interface, signal processing, threading, widgets, safety monitoring |
 | [docs/DESIGN_RATIONALE.md](docs/DESIGN_RATIONALE.md) | Justification and references for all algorithms, filters, and constants |
 | [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | WSL2 build setup, ADB commands, all Android-specific code modifications |
 | [docs/MOBILE_APP_OVERVIEW.md](docs/MOBILE_APP_OVERVIEW.md) | High-level architecture index |
+| [docs/ifu.md](docs/ifu.md) | Instructions for Use: electrode placement, session protocol, skin care, safety |
 
 ---
 
@@ -96,17 +98,23 @@ buildozer.spec          Android build config
   build-apk.yml         Manual APK build via Buildozer Docker image
 app/
   core/                 Config, device TCP protocol, path resolution
-  data/                 DataReceiverThread (TCP recv loop, pipeline dispatch)
-  managers/             RecordingManager, StreamingController
-  processing/           iir_filter.py, filters.py, features.py, pipeline.py
-  ui/screens/           SelectionScreen, LiveDataScreen, DataAnalysisScreen, AnalysisPlotScreen
-  ui/widgets/           EMGPlotWidget, MultiTrackPlotWidget, HeatmapWidget, CalibrationPopup
+  data/                 DataReceiverThread (TCP recv loop, pipeline dispatch, disconnect detection)
+  managers/             RecordingManager (autosave, metadata), StreamingController, SessionHistoryManager
+  processing/           iir_filter.py, filters.py, features.py, pipeline.py,
+                        live_metrics.py, clipping_detector.py
+  ui/screens/           SelectionScreen, LiveDataScreen (basic/advanced modes),
+                        DataAnalysisScreen, AnalysisPlotScreen, LongitudinalScreen
+  ui/widgets/           EMGPlotWidget, MultiTrackPlotWidget, HeatmapWidget, CalibrationPopup,
+                        TrendPlotWidget, SessionMetadataPopup, SENIAMGuidePopup, CrosstalkPopup
 scripts/                compute_filter_coeffs.py (offline, desktop only)
 tests/                  test_iir_filter.py, test_filters.py, test_features.py,
                         test_pipeline.py, test_device.py, test_recording_manager.py,
-                        test_data_receiver.py, test_networking.py, test_processing.py
+                        test_data_receiver.py, test_networking.py, test_processing.py,
+                        test_autosave.py, test_calibration_verification.py,
+                        test_clipping_detector.py, test_crosstalk.py,
+                        test_disconnect_detection.py, test_latency_monitor.py
 bin/                    Pre-built APK
-docs/                   All documentation
+docs/                   All documentation (including IFU)
 ```
 
 ---
@@ -127,4 +135,10 @@ python -m unittest tests.test_recording_manager
 python -m unittest tests.test_data_receiver
 python -m unittest tests.test_networking
 python -m unittest tests.test_processing
+python -m unittest tests.test_autosave
+python -m unittest tests.test_calibration_verification
+python -m unittest tests.test_clipping_detector
+python -m unittest tests.test_crosstalk
+python -m unittest tests.test_disconnect_detection
+python -m unittest tests.test_latency_monitor
 ```

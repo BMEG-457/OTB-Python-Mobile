@@ -22,14 +22,14 @@ class SessionMetadataPopup(Popup):
     def __init__(self, on_confirm, **kwargs):
         super().__init__(**kwargs)
         self.title = 'Session Metadata'
-        self.size_hint = (0.85, 0.7)
+        self.size_hint = (0.85, 0.85)
         self.auto_dismiss = False
         self._on_confirm = on_confirm
 
         layout = BoxLayout(orientation='vertical', padding=12, spacing=8)
 
         # Date
-        row_date = BoxLayout(orientation='horizontal', size_hint=(1, None), height=44)
+        row_date = BoxLayout(orientation='horizontal', size_hint=(1, None), height=66)
         row_date.add_widget(Label(text='Date:', size_hint=(0.35, 1), font_size=sp(15)))
         self._inp_date = TextInput(
             text=date.today().isoformat(), multiline=False,
@@ -39,7 +39,7 @@ class SessionMetadataPopup(Popup):
         layout.add_widget(row_date)
 
         # Subject / Patient ID
-        row_subject = BoxLayout(orientation='horizontal', size_hint=(1, None), height=44)
+        row_subject = BoxLayout(orientation='horizontal', size_hint=(1, None), height=66)
         row_subject.add_widget(Label(text='Subject ID:', size_hint=(0.35, 1), font_size=sp(15)))
         self._inp_subject = TextInput(
             text='', multiline=False, hint_text='e.g. P001',
@@ -49,7 +49,7 @@ class SessionMetadataPopup(Popup):
         layout.add_widget(row_subject)
 
         # Muscle Group
-        row_muscle = BoxLayout(orientation='horizontal', size_hint=(1, None), height=44)
+        row_muscle = BoxLayout(orientation='horizontal', size_hint=(1, None), height=66)
         row_muscle.add_widget(Label(text='Muscle Group:', size_hint=(0.35, 1), font_size=sp(15)))
         self._spn_muscle = Spinner(
             text=CFG.SESSION_MUSCLE_GROUPS[0],
@@ -60,7 +60,7 @@ class SessionMetadataPopup(Popup):
         layout.add_widget(row_muscle)
 
         # Exercise Type
-        row_exercise = BoxLayout(orientation='horizontal', size_hint=(1, None), height=44)
+        row_exercise = BoxLayout(orientation='horizontal', size_hint=(1, None), height=66)
         row_exercise.add_widget(Label(text='Exercise:', size_hint=(0.35, 1), font_size=sp(15)))
         self._spn_exercise = Spinner(
             text=CFG.SESSION_EXERCISE_TYPES[0],

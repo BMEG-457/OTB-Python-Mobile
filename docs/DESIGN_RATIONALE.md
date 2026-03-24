@@ -99,6 +99,30 @@ This places the threshold at 30% MVC, a value commonly used in clinical EMG to d
 
 **Reference:** [5] Bonato P, D'Alessio T, Knaflitz M (1998). *A statistical method for the measurement of muscle activation intervals from surface myoelectric signal during gait.* IEEE Trans Biomed Eng, 45(3), 287–299.
 
+### Verification phase: spatial concentration check (`CALIBRATION_VERIFY_ACTIVE_FRAC = 0.25`)
+
+The third calibration phase asks the subject to perform dorsiflexion while the app evaluates whether activation is spatially concentrated (good electrode placement) or diffuse (poor placement).
+
+```
+concentration = sum(top_quarter_channels_rms) / sum(all_channels_rms)
+```
+
+If the top 25% of channels account for more than 25% of total RMS (concentration > 0.25), the electrode array is considered well-positioned over the target muscle belly. A diffuse pattern suggests the array is placed over a muscle boundary, tendon region, or an area with significant crosstalk from adjacent muscles.
+
+This approach is based on the principle that a well-placed HD-sEMG array should show a spatially focused activation pattern during a target-muscle contraction [6, 13].
+
+### Crosstalk verification (`CROSSTALK_DURATION = 3.0`, `CROSSTALK_THRESHOLD_K = 3.0`)
+
+The crosstalk test asks the subject to perform plantar flexion (gastrocnemius activation) while monitoring the TA electrode array. Channels where:
+
+```
+test_rms > baseline_rms + 3.0 × baseline_rms
+```
+
+are flagged as potential crosstalk sources. The k=3 multiplier was chosen as a conservative threshold: genuine crosstalk from the gastrocnemius during plantar flexion would produce activation well above 3× the resting baseline on a TA-placed array, while noise fluctuations during rest are unlikely to exceed this. The 3-second duration matches the rest and MVC phases for consistency.
+
+Crosstalk verification is particularly important for the tibialis anterior because of its proximity to the extensor digitorum longus and the gastrocnemius/soleus complex [8].
+
 ---
 
 ## 4. Heatmap
@@ -109,9 +133,17 @@ This places the threshold at 30% MVC, a value commonly used in clinical EMG to d
 
 ### Normalization to MVC
 
-After calibration, each channel's RMS is divided by `mvc_rms[ch]`. This produces a value in [0, 1] where 0 = baseline and 1 = MVC. Before calibration, the heatmap auto-scales to the current peak RMS (relative display). This matches the approach described by Farina et al. for HD-sEMG visualization [6].
+After calibration, each channel's RMS is divided by `mvc_rms[ch]`. This produces a value in [0, 1] where 0 = baseline and 1 = MVC. Before calibration, the heatmap is inactive (see below). This matches the approach described by Farina et al. for HD-sEMG visualization [6].
 
 **Reference:** [6] Farina D et al. (2008). *Extracting information from surface EMG signals: a review of signal processing techniques.* IEEE Trans Biomed Eng, 55(2 Pt 1), 523–535.
+
+### Pre-calibration heatmap behaviour
+
+Before calibration, the heatmap is inactive and displays no color. This prevents misleading auto-scaled visualizations where noise could appear as activation. After calibration, the heatmap colors are scaled relative to the MVC values, providing clinically meaningful spatial activation maps.
+
+### Grid lines and channel labels
+
+Grid lines and channel number labels were added to the heatmap to aid electrode identification during clinical use. When a clinician observes unusual activity on a specific cell, the channel label allows immediate cross-reference with the electrode array's physical layout.
 
 ### Channel-to-grid mapping: `ch = col × 8 + (7 − row)`
 
@@ -265,7 +297,27 @@ The fraction of channels with RMS above the mean (or above calibration threshold
 
 ---
 
-## 10. UI / Rendering
+## 10. Safety Monitoring
+
+### Clipping detection (`ADC_RAIL_VALUE = 32767`, `CLIPPING_FRACTION_THRESHOLD = 0.01`)
+
+The Sessantaquattro+ outputs 16-bit signed integers. When the signal amplitude exceeds the ADC range, samples are clipped at ±32767. Clipping causes waveform distortion and invalidates all downstream analyses (RMS, frequency, onset detection).
+
+The detector flags a channel when more than 1% of samples in a packet are at the rail value. This threshold is low enough to catch intermittent clipping (e.g. from poor electrode contact) while avoiding false alarms from single-sample noise spikes. Clipping typically indicates electrode lift-off, excessive pressure, or cable movement artifacts [2].
+
+### Disconnect detection (`DISCONNECT_WARNING_SEC = 5`)
+
+If no data packet is received for 5 seconds while streaming is active, the UI displays a disconnect warning. At 16 packets/second, 5 seconds represents 80 missed packets — well beyond normal WiFi jitter (typically <100 ms). A shorter threshold would cause false alarms during brief WiFi interference; a longer one would delay the user's awareness of a genuine disconnection.
+
+### Latency monitoring (`LATENCY_WARNING_MS = 100`, `LATENCY_ROLLING_WINDOW = 10`)
+
+Processing latency is tracked as the time between packet receipt and UI render. A rolling window of 10 measurements smooths single-packet spikes. The 100 ms warning threshold corresponds to the upper bound of acceptable visual feedback delay for motor control tasks [15]. Above this threshold, the EMG display lags perceptibly behind the subject's movements.
+
+**Reference:** [15] Card SK, Moran TP, Newell A (1983). *The Psychology of Human-Computer Interaction.* Lawrence Erlbaum Associates.
+
+---
+
+## 11. UI / Rendering
 
 ### Render rate: 30 fps (`RENDER_FPS = 30`)
 
@@ -287,23 +339,35 @@ At 2000 Hz, a 2-second window contains 4000 samples. A phone display at 1920×10
 
 ---
 
-## 11. Recording
+## 12. Recording
 
 ### Maximum samples: 1,000,000 (`RECORDING_MAX_SAMPLES = 1_000_000`)
 
 At 2000 Hz, 1,000,000 samples = 500 seconds (~8.3 minutes). A `(72, 1_000_000)` float32 array uses 72 × 1,000,000 × 4 bytes = ~274 MB RAM. This is the practical limit for pre-allocation on a mobile device with limited RAM. For longer recordings, stop and start a new recording.
 
+### Autosave write-through
+
+Clinical recording sessions must not lose data due to app crashes or device failures. The autosave mechanism writes each sample to a temp CSV file in real time during recording, using OS buffering (not fsync per sample, which would be prohibitively slow). On normal save, the temp file is renamed to the final filename — an atomic operation that prevents partial writes. If the app crashes, the autosave file is detected and recovered on next launch.
+
+This design was chosen over periodic batch writes because the per-sample overhead of CSV row appending is negligible relative to the 0.5 ms inter-sample interval at 2000 Hz, and it guarantees no more than one sample of data loss in the worst case.
+
+### Session metadata and longitudinal tracking (`LONGITUDINAL_MAX_SESSIONS = 200`)
+
+Each recording session captures structured metadata (subject ID, muscle group, exercise type, date, notes) in a JSON sidecar file alongside the CSV. Summary metrics (RMS, MAV, median frequency, fatigue flags, contraction count) are computed from the recorded data and appended to a longitudinal history file.
+
+The 200-session limit prevents unbounded history file growth while retaining sufficient history for multi-week study protocols. At one session per day, 200 sessions covers approximately 6 months.
+
 ---
 
-## 12. Pure-numpy IIR Design Choices
+## 13. Pure-numpy IIR Design Choices
 
 ### Direct Form II Transposed (`lfilter`)
 
 The Direct Form II Transposed (DF2T) structure was chosen for `lfilter` because it is numerically equivalent to scipy's implementation, minimises the number of state variables (M = filter order − 1), and is straightforward to vectorize in NumPy. Numerical precision is adequate for the filter orders used here (order ≤ 8 for bandpass).
 
-### Reflect padding in `filtfilt`
+### Mirror padding and initial conditions in `filtfilt`
 
-`filtfilt` uses reflect (odd-symmetric) padding of length `3 × max(len(a), len(b))` at both ends before the forward and backward passes. This matches scipy's default `padtype='odd'`. The padding reduces edge transients that would otherwise distort the first and last segments of the filtered signal.
+`filtfilt` uses mirror (odd-symmetric) padding of length `3 × (max(len(a), len(b)) - 1)` at both ends. Initial conditions are computed via `_lfilter_zi()` (solving for the steady-state output given the first/last padded sample) and applied via `_lfilter_ic()` for both the forward and backward passes. This approach matches scipy's `filtfilt` with `padtype='odd'` and `method='pad'`, reducing startup transients compared to simple zero-state filtering. The more conservative pad length formula (`- 1`) avoids over-padding for low-order filters while still providing sufficient transient decay.
 
 ### Linear interpolation in `resample_signal`
 
@@ -327,3 +391,4 @@ scipy's `resample` uses FFT-based sinc interpolation, which assumes the signal i
 12. Lindstrom L, Magnusson R, Petersen I (1977). *Muscular fatigue and action potential conduction velocity changes studied with frequency analysis of EMG signals.* Electromyography, 10(4), 341–356.
 13. Farina D, Leclerc F, Arendt-Nielsen L, Buttelli O, Madeleine P (2008). *The change in spatial distribution of upper trapezius muscle activity is correlated to contraction duration.* J Electromyogr Kinesiol, 18(1), 16–25.
 14. Gallina A, Ritzel CH, Merletti R, Vieira TM (2011). *Do surface EMG signals from the upper trapezius muscle reflect the activation of all motor units?* J Electromyogr Kinesiol, 21(5), 742–748.
+15. Card SK, Moran TP, Newell A (1983). *The Psychology of Human-Computer Interaction.* Lawrence Erlbaum Associates.

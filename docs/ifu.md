@@ -38,12 +38,16 @@ Place the reference electrode on an electrically neutral site (e.g., lateral mal
 - **Typical fatigue protocol:** Sustained contraction at 30-50% MVC until task failure or pre-defined duration
 
 ### Session Workflow
-1. Apply electrode array and verify placement (see Section 1)
-2. Connect to device via the app
-3. Run calibration (rest baseline + MVC + verification)
-4. Optionally run crosstalk verification
-5. Begin recording protocol
-6. Save recording and review summary metrics
+1. Apply electrode array and verify placement (see Section 1). Tap **Guide** in the app for a SENIAM placement reference.
+2. Connect to device via the app (tap **Stream**)
+3. Run calibration (tap **Calibrate**):
+   - Phase 1: Rest baseline (3 s) — remain relaxed
+   - Phase 2: MVC (3 s) — maximum voluntary contraction
+   - Phase 3: Verification (3 s) — dorsiflexion to verify spatial concentration (PASS/WARNING displayed)
+4. Optionally run crosstalk verification (tap **Crosstalk**) — perform plantar flexion; flagged channels indicate possible crosstalk from adjacent muscles
+5. Tap **Record**, enter session metadata (date, subject ID, muscle group, exercise type, notes), then tap **Start Recording**
+6. Perform the recording protocol
+7. Tap **Record** again to stop — CSV, metadata sidecar, and session summary are saved automatically
 
 ### Prolonged Use
 - If the subject reports discomfort, numbness, or skin irritation, stop the session immediately and remove the electrode array.
@@ -117,3 +121,4 @@ Place the reference electrode on an electrically neutral site (e.g., lateral mal
 | Version | Date       | Description                              |
 |---------|------------|------------------------------------------|
 | 1.0     | 2026-03-23 | Initial release                          |
+| 1.1     | 2026-03-24 | Updated session workflow for 3-phase calibration, crosstalk verification, metadata entry, and SENIAM guide |

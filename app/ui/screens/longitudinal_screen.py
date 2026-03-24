@@ -88,7 +88,7 @@ class LongitudinalScreen(Screen):
         # Session list
         scroll = ScrollView(size_hint=(1, 0.33))
         self._session_grid = GridLayout(
-            cols=1, spacing=4, padding=8, size_hint_y=None,
+            cols=1, spacing=16, padding=12, size_hint_y=None,
         )
         self._session_grid.bind(minimum_height=self._session_grid.setter('height'))
         scroll.add_widget(self._session_grid)
@@ -145,8 +145,8 @@ class LongitudinalScreen(Screen):
         self._session_grid.clear_widgets()
         for s in reversed(self._sessions):  # newest first
             card = BoxLayout(
-                orientation='vertical', size_hint_y=None, height=90,
-                padding=6, spacing=2,
+                orientation='vertical', size_hint_y=None, height=150,
+                padding=8, spacing=14,
             )
             line1 = (
                 f"{s.get('date', '?')}  |  {s.get('muscle_group', '?')}  |  "
@@ -158,10 +158,10 @@ class LongitudinalScreen(Screen):
                 f"Contractions: {s.get('contraction_count', 0)}"
             )
             line3 = f"Subject: {s.get('subject_id', '--')}  |  Duration: {s.get('duration_sec', 0):.1f}s"
-            card.add_widget(Label(text=line1, font_size=sp(13), size_hint_y=None, height=26,
+            card.add_widget(Label(text=line1, font_size=sp(14), size_hint_y=None, height=30,
                                   color=(0.9, 0.9, 0.9, 1), halign='left'))
-            card.add_widget(Label(text=line2, font_size=sp(12), size_hint_y=None, height=26,
+            card.add_widget(Label(text=line2, font_size=sp(13), size_hint_y=None, height=30,
                                   color=(0.7, 0.85, 1.0, 1), halign='left'))
-            card.add_widget(Label(text=line3, font_size=sp(11), size_hint_y=None, height=22,
+            card.add_widget(Label(text=line3, font_size=sp(12), size_hint_y=None, height=26,
                                   color=(0.6, 0.6, 0.6, 1), halign='left'))
             self._session_grid.add_widget(card)
