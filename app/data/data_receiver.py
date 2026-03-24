@@ -47,6 +47,11 @@ class DataReceiverThread(threading.Thread):
 
         self._packet_count = 0
         self._last_time    = time.time()
+        self._pending_recv_time = None  # timestamp of most recent packet receipt
+
+        self._last_packet_time   = time.time()
+        self._disconnect_warned  = False
+        self.on_disconnect       = None  # optional callback(elapsed_sec)
 
         try:
             self.client_socket.settimeout(_SOCKET_TIMEOUT)
@@ -86,6 +91,8 @@ class DataReceiverThread(threading.Thread):
                         samples_per_pkt, nch
                     ).T  # shape (nchannels, samples_per_pkt)
 
+                    self._pending_recv_time = time.time()
+
                     # Raw stage — always emitted (recording needs it regardless of running)
                     self.on_stage('raw', raw)
 
@@ -110,6 +117,8 @@ class DataReceiverThread(threading.Thread):
                         self.on_stage('final', final)
 
                     self._packet_count += 1
+                    self._last_packet_time = time.time()
+                    self._disconnect_warned = False
                     if self._packet_count == 1:
                         print("[RECEIVER] First packet processed successfully")
 
@@ -124,7 +133,12 @@ class DataReceiverThread(threading.Thread):
                             )
 
             except socket.timeout:
-                # Normal during pause (running=False) — keep thread alive
+                if self.running and not self._disconnect_warned:
+                    elapsed = time.time() - self._last_packet_time
+                    if elapsed > CFG.DISCONNECT_WARNING_SEC:
+                        self._disconnect_warned = True
+                        if self.on_disconnect:
+                            self.on_disconnect(elapsed)
                 continue
 
             except Exception as e:

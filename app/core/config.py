@@ -71,11 +71,15 @@ PLOT_TIME_WINDOW_PRESETS = _raw['plot'].get('time_window_presets', [
 PLOT_DEFAULT_TIME_IDX   = _raw['plot'].get('default_time_window_idx', 0)
 
 # -- Calibration ---------------------------------------------------------------
-CALIBRATION_REST_DURATION  = _raw['calibration']['rest_duration']
-CALIBRATION_MVC_DURATION   = _raw['calibration']['mvc_duration']
-CALIBRATION_THRESHOLD_FRAC = _raw['calibration']['threshold_frac']
-CALIBRATION_DISMISS_DELAY  = _raw['calibration']['dismiss_delay']
-CALIBRATION_PROGRESS_FPS   = _raw['calibration']['progress_fps']
+CALIBRATION_REST_DURATION   = _raw['calibration']['rest_duration']
+CALIBRATION_MVC_DURATION    = _raw['calibration']['mvc_duration']
+CALIBRATION_THRESHOLD_FRAC  = _raw['calibration']['threshold_frac']
+CALIBRATION_DISMISS_DELAY   = _raw['calibration']['dismiss_delay']
+CALIBRATION_PROGRESS_FPS    = _raw['calibration']['progress_fps']
+CROSSTALK_DURATION             = _raw['calibration']['crosstalk_duration']
+CROSSTALK_THRESHOLD_K          = _raw['calibration']['crosstalk_threshold_k']
+CALIBRATION_VERIFY_DURATION    = _raw['calibration']['verification_duration']
+CALIBRATION_VERIFY_ACTIVE_FRAC = _raw['calibration']['verification_active_fraction']
 
 # -- Feature analysis defaults -------------------------------------------------
 FEATURE_BANDPASS_LOW          = _raw['features']['bandpass_low']
@@ -128,6 +132,16 @@ RECORDING_MAX_SAMPLES = _raw['recording']['max_samples']
 # -- Session metadata ----------------------------------------------------------
 SESSION_MUSCLE_GROUPS  = _raw['session']['muscle_groups']
 SESSION_EXERCISE_TYPES = _raw['session']['exercise_types']
+
+# -- Longitudinal tracking -----------------------------------------------------
+LONGITUDINAL_MAX_SESSIONS = _raw['longitudinal']['max_sessions']
+
+# -- Safety --------------------------------------------------------------------
+LATENCY_WARNING_MS          = _raw['safety']['latency_warning_threshold_ms']
+LATENCY_ROLLING_WINDOW      = _raw['safety']['latency_rolling_window']
+DISCONNECT_WARNING_SEC      = _raw['safety']['disconnect_warning_sec']
+ADC_RAIL_VALUE              = _raw['safety']['adc_rail_value']
+CLIPPING_FRACTION_THRESHOLD = _raw['safety']['clipping_fraction_threshold']
 
 # -- Paths ---------------------------------------------------------------------
 ANDROID_PACKAGE_NAME   = _raw['paths']['android_package_name']

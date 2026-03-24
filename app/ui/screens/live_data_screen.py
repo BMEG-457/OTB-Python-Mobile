@@ -1,6 +1,7 @@
 """Live data viewing screen."""
 
 import threading
+import time
 import numpy as np
 
 from kivy.uix.screenmanager import Screen
@@ -20,11 +21,14 @@ from app.processing.pipeline import get_pipeline
 from app.processing import filters
 from app.processing.iir_filter import StatefulIIRFilter
 from app.processing.live_metrics import LiveMetricsComputer
+from app.processing.clipping_detector import ClippingDetector
 from app.ui.widgets.emg_plot_widget import EMGPlotWidget
 from app.ui.widgets.multi_track_plot import MultiTrackPlotWidget
 from app.ui.widgets.heatmap_widget import HeatmapWidget
 from app.ui.widgets.calibration_popup import CalibrationPopup
 from app.ui.widgets.session_metadata_popup import SessionMetadataPopup
+from app.ui.widgets.seniam_guide_popup import SENIAMGuidePopup
+from app.ui.widgets.crosstalk_popup import CrosstalkVerificationPopup
 from app.core import config as CFG
 
 
@@ -125,6 +129,13 @@ class LiveDataScreen(Screen):
         self._auto_mav_channel = 0
         self._envelope_pending = None  # (samples,) envelope for selected channel
 
+        # Latency monitoring
+        self._latency_window = []
+
+        # Clipping detection
+        self._clipping_detector = ClippingDetector()
+        self._pending_clipping = []
+
         # Real-time metrics
         self._metrics_computer = LiveMetricsComputer()
         self._pending_metrics = None
@@ -148,6 +159,12 @@ class LiveDataScreen(Screen):
 
     def on_enter(self):
         self._start_battery_poll()
+        # Recover any autosave files left behind by a previous crash
+        orphans = RecordingManager.find_orphaned_autosaves()
+        if orphans:
+            for f in orphans:
+                RecordingManager.recover_autosave(f)
+            self._set_bottom(f'Recovered {len(orphans)} recording(s) from previous session.')
 
     def on_leave(self):
         self._stop_battery_poll()
@@ -207,14 +224,25 @@ class LiveDataScreen(Screen):
         top_bar.add_widget(btn_back)
 
         self.btn_calibrate = Button(
-            text='Calibrate', size_hint=(0.13, 1), font_size=sp(15)
+            text='Calibrate', size_hint=(0.10, 1), font_size=sp(15)
         )
         self.btn_calibrate.bind(on_press=self._on_calibrate)
         self.btn_calibrate.disabled = True
         top_bar.add_widget(self.btn_calibrate)
 
+        btn_guide = Button(text='Guide', size_hint=(0.08, 1), font_size=sp(15))
+        btn_guide.bind(on_press=lambda x: SENIAMGuidePopup().open())
+        top_bar.add_widget(btn_guide)
+
+        self.btn_crosstalk = Button(
+            text='Crosstalk', size_hint=(0.10, 1), font_size=sp(14)
+        )
+        self.btn_crosstalk.bind(on_press=self._on_crosstalk)
+        self.btn_crosstalk.disabled = True
+        top_bar.add_widget(self.btn_crosstalk)
+
         self.btn_stream = Button(
-            text='Start Stream', size_hint=(0.15, 1),
+            text='Start Stream', size_hint=(0.13, 1),
             font_size=sp(15), background_color=CFG.BTN_STREAM_IDLE
         )
         self.btn_stream.bind(on_press=self._on_toggle_stream)
@@ -240,13 +268,26 @@ class LiveDataScreen(Screen):
         )
         top_bar.add_widget(self.battery_label)
 
+        self.latency_label = Label(
+            text='Lat: --', color=(0.5, 0.5, 0.5, 1),
+            size_hint=(0.08, 1), font_size=sp(14),
+        )
+        top_bar.add_widget(self.latency_label)
+
         self.status_label = Label(
             text='Not connected', color=(0.7, 0.7, 0.7, 1),
-            size_hint=(0.20, 1), font_size=sp(14),
+            size_hint=(0.12, 1), font_size=sp(14),
         )
         top_bar.add_widget(self.status_label)
 
         root.add_widget(top_bar)
+
+        # ---- Disconnect warning banner ----
+        self._disconnect_label = Label(
+            text='', font_size=sp(18), color=(1, 0.2, 0.2, 1),
+            size_hint=(1, 0.05), opacity=0,
+        )
+        root.add_widget(self._disconnect_label)
 
         # ---- Tab + View mode bar ----
         tab_bar = BoxLayout(
@@ -335,24 +376,29 @@ class LiveDataScreen(Screen):
         )
         self._lbl_rms = Label(
             text='RMS: --', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
-            size_hint=(0.25, 1),
+            size_hint=(0.20, 1),
         )
         self._lbl_mf = Label(
             text='MF: -- Hz', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
-            size_hint=(0.25, 1),
+            size_hint=(0.20, 1),
         )
         self._lbl_fatigue = Label(
             text='Fatigue: --', font_size=sp(14), color=(0.5, 0.5, 0.5, 1),
-            size_hint=(0.25, 1),
+            size_hint=(0.20, 1),
         )
         self._lbl_active_ch = Label(
             text='Ch: --', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
-            size_hint=(0.25, 1),
+            size_hint=(0.20, 1),
+        )
+        self._lbl_clipping = Label(
+            text='', font_size=sp(14), color=(1, 0.2, 0.2, 1),
+            size_hint=(0.20, 1),
         )
         self._metrics_bar.add_widget(self._lbl_rms)
         self._metrics_bar.add_widget(self._lbl_mf)
         self._metrics_bar.add_widget(self._lbl_fatigue)
         self._metrics_bar.add_widget(self._lbl_active_ch)
+        self._metrics_bar.add_widget(self._lbl_clipping)
         root.add_widget(self._metrics_bar)
 
         # ---- Bottom status bar ----
@@ -639,6 +685,10 @@ class LiveDataScreen(Screen):
             ),
         )
 
+        self.receiver_thread.on_disconnect = lambda elapsed: Clock.schedule_once(
+            lambda dt: self._on_disconnect_warning(elapsed), 0
+        )
+
         self.streaming_controller = StreamingController(
             update_callback=self._ui_tick,
             receiver_thread=self.receiver_thread,
@@ -673,6 +723,13 @@ class LiveDataScreen(Screen):
         self._set_bottom(f'Receiver error: {message}')
         self._stop_stream()
 
+    def _on_disconnect_warning(self, elapsed):
+        self._disconnect_label.text = f'SIGNAL LOST - No data for {elapsed:.0f}s'
+        self._disconnect_label.opacity = 1
+
+    def _clear_disconnect_warning(self):
+        self._disconnect_label.opacity = 0
+
     # ------------------------------------------------------------------
     # Data callback (receiver thread → stored for 60fps tick)
     # ------------------------------------------------------------------
@@ -681,6 +738,12 @@ class LiveDataScreen(Screen):
         """Called by the receiver thread for every processed packet."""
         # Recording — forward raw data directly on the receiver thread
         self.recording_manager.on_data_for_recording(stage, data)
+
+        # Clipping detection on raw (pre-filter) data
+        if stage == 'raw':
+            clipped = self._clipping_detector.check(data)
+            if clipped:
+                self._pending_clipping = clipped
 
         # Calibration listener
         if self._calibration_extra_callback is not None:
@@ -722,6 +785,24 @@ class LiveDataScreen(Screen):
             return
         self._pending_data = None
 
+        # Clear disconnect warning on data resume
+        if self._disconnect_label.opacity > 0:
+            self._clear_disconnect_warning()
+
+        # Update latency indicator
+        recv_time = self.receiver_thread._pending_recv_time if self.receiver_thread else None
+        if recv_time is not None:
+            latency_ms = (time.time() - recv_time) * 1000
+            self._latency_window.append(latency_ms)
+            if len(self._latency_window) > CFG.LATENCY_ROLLING_WINDOW:
+                self._latency_window.pop(0)
+            avg_lat = sum(self._latency_window) / len(self._latency_window)
+            self.latency_label.text = f'Lat: {avg_lat:.0f}ms'
+            if avg_lat > CFG.LATENCY_WARNING_MS:
+                self.latency_label.color = (1, 0.2, 0.2, 1)
+            else:
+                self.latency_label.color = (0.3, 1, 0.3, 1)
+
         # Update contraction label (reads state set by receiver thread)
         self.contraction_label.text = self._contraction_text
         self.contraction_label.color = self._contraction_color
@@ -735,6 +816,14 @@ class LiveDataScreen(Screen):
             self._lbl_fatigue.text = 'Fatigue: YES' if fatigue else 'Fatigue: No'
             self._lbl_fatigue.color = (1, 0.3, 0.3, 1) if fatigue else (0.3, 1, 0.3, 1)
             self._lbl_active_ch.text = f'Ch: {self._get_active_channel_index() + 1}'
+
+        # Update clipping indicator
+        if self._pending_clipping:
+            ch_str = ', '.join(str(c + 1) for c in self._pending_clipping[:5])
+            self._lbl_clipping.text = f'CLIP: Ch {ch_str}'
+            self._pending_clipping = []
+        else:
+            self._lbl_clipping.text = ''
 
         if self._active_tab == 'plot':
             self._render_plot_panel(data)
@@ -841,12 +930,36 @@ class LiveDataScreen(Screen):
         self.mvc_rms = mvc_rms
         self.is_calibrated = True
         self.btn_record.disabled = False
+        self.btn_crosstalk.disabled = False
         # Pass baseline RMS of active channel to metrics computer
         active_ch = self._get_active_channel_index()
         if baseline_rms is not None and active_ch < len(baseline_rms):
             self._metrics_computer.set_baseline(float(baseline_rms[active_ch]))
         self._set_bottom('Calibration complete.')
         self._set_status('Calibrated')
+
+    # ------------------------------------------------------------------
+    # Crosstalk verification
+    # ------------------------------------------------------------------
+
+    def _on_crosstalk(self, instance):
+        if not self.is_calibrated:
+            self._set_bottom('Calibrate first.')
+            return
+        popup = CrosstalkVerificationPopup(
+            baseline_rms=self.baseline_rms,
+            on_complete=self._on_crosstalk_complete,
+            on_sample_connect=self._register_calibration_callback,
+            on_sample_disconnect=self._unregister_calibration_callback,
+        )
+        popup.start()
+
+    def _on_crosstalk_complete(self, passed, flagged):
+        if passed:
+            self._set_bottom('Crosstalk check: PASS')
+        else:
+            ch_str = ', '.join(str(c + 1) for c in flagged[:5])
+            self._set_bottom(f'Crosstalk check: WARNING — Ch {ch_str}')
 
     # ------------------------------------------------------------------
     # Recording

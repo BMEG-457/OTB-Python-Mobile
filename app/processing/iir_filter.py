@@ -78,15 +78,20 @@ def _lfilter_1d(b, a, x, M):
 def filtfilt(b, a, x):
     """Zero-phase IIR filter: forward lfilter then backward lfilter.
 
-    Uses reflect padding (length = 3 * max(len(a), len(b))) to reduce
-    edge transients, matching scipy.signal.filtfilt's default behaviour.
+    Uses reflect padding and initial conditions to reduce edge transients,
+    matching scipy.signal.filtfilt's behaviour.
     Falls back to causal lfilter for signals too short to pad.
 
     Supports 1-D signals and 2-D arrays of shape (channels, samples).
     """
     b = np.asarray(b, dtype=float)
     a = np.asarray(a, dtype=float)
-    padlen = 3 * max(len(a), len(b))
+    if a[0] != 1.0:
+        b = b / a[0]
+        a = a / a[0]
+
+    padlen = 3 * (max(len(a), len(b)) - 1)
+    padlen = max(padlen, 1)
 
     if x.ndim == 1:
         return _filtfilt_1d(b, a, x, padlen)
@@ -97,17 +102,70 @@ def filtfilt(b, a, x):
     return result
 
 
+def _lfilter_zi(b, a):
+    """Compute initial conditions for lfilter to produce a steady-state output.
+
+    Equivalent to scipy.signal.lfilter_zi: solves
+        (I - A) zi = B
+    where A and B come from the Direct Form II Transposed structure.
+    This gives zi such that lfilter(b, a, x, zi=zi*x[0]) starts with
+    no transient for a constant input equal to x[0].
+    """
+    M = max(len(b), len(a)) - 1
+    if M == 0:
+        return np.array([])
+    b = np.r_[b, np.zeros(max(0, M + 1 - len(b)))]
+    a = np.r_[a, np.zeros(max(0, M + 1 - len(a)))]
+
+    # Build the companion matrix system: (I - A) zi = B
+    # where A[i,j] = -a[i+1] if j==0, 1 if j==i+1, else 0
+    # and B[i] = b[i+1] - a[i+1]*b[0]
+    IminusA = np.eye(M)
+    IminusA[:, 0] += a[1:M + 1]
+    for i in range(M - 1):
+        IminusA[i, i + 1] = -1.0
+    B = b[1:M + 1] - a[1:M + 1] * b[0]
+    return np.linalg.solve(IminusA, B)
+
+
+def _lfilter_ic(b, a, x, zi):
+    """Apply lfilter with initial conditions zi. Returns (output, final_zi)."""
+    M = max(len(b), len(a)) - 1
+    b = np.r_[b, np.zeros(max(0, M + 1 - len(b)))]
+    a = np.r_[a, np.zeros(max(0, M + 1 - len(a)))]
+
+    n = len(x)
+    y = np.zeros(n)
+    z = zi.copy()
+    b0 = b[0]
+    for i in range(n):
+        yi = b0 * x[i] + z[0]
+        for j in range(M - 1):
+            z[j] = b[j + 1] * x[i] - a[j + 1] * yi + z[j + 1]
+        if M > 0:
+            z[M - 1] = b[M] * x[i] - a[M] * yi
+        y[i] = yi
+    return y, z
+
+
 def _filtfilt_1d(b, a, x, padlen):
     n = len(x)
     if n <= padlen:
         # Signal too short for reflection padding — apply causal filter only.
         return lfilter(b, a, x)
 
+    # Compute initial condition template
+    zi = _lfilter_zi(b, a)
+
     # Reflect-pad both ends
-    ext = np.r_[x[padlen:0:-1], x, x[-2:-padlen - 2:-1]]
-    y = lfilter(b, a, ext)
-    y = lfilter(b, a, y[::-1])[::-1]
-    return y[padlen:-padlen]
+    ext = np.r_[2 * x[0] - x[padlen:0:-1], x, 2 * x[-1] - x[-2:-padlen - 2:-1]]
+
+    # Forward pass with initial conditions
+    y_fwd, _ = _lfilter_ic(b, a, ext, zi * ext[0])
+    # Backward pass with initial conditions
+    y_bwd, _ = _lfilter_ic(b, a, y_fwd[::-1], zi * y_fwd[-1])
+
+    return y_bwd[::-1][padlen:-padlen]
 
 
 # ---------------------------------------------------------------------------

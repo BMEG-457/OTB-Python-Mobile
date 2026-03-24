@@ -100,9 +100,12 @@ class TestBasicFeatures(unittest.TestCase):
 class TestPreprocessTimestamps(unittest.TestCase):
 
     def test_removes_nan(self):
-        sig = np.array([1.0, 2.0, np.nan, 4.0, 5.0])
-        ts  = np.array([0.0, 0.1, 0.2,    0.3,  0.4])
+        # Need >=30 valid samples after NaN removal for _preprocess_timestamps
+        sig = np.arange(40, dtype=float)
+        ts  = np.linspace(0, 1, 40)
+        sig[5] = np.nan   # inject one NaN
         s2, t2 = _preprocess_timestamps(sig, ts)
+        self.assertIsNotNone(s2)
         self.assertFalse(np.any(np.isnan(s2)))
         self.assertFalse(np.any(np.isnan(t2)))
 

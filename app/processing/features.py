@@ -90,7 +90,9 @@ def _preprocess_timestamps(signal, ts):
         new_ts.extend(np.linspace(unique[-1], unique[-1] + last_interval, n_repeats, endpoint=False))
         ts = np.array(new_ts)
 
-    inc_mask = np.diff(ts, prepend=ts[0]) > 0
+    # Keep only samples where ts equals the running maximum (strictly increasing)
+    cum_max = np.maximum.accumulate(ts)
+    inc_mask = np.concatenate([[True], ts[1:] > cum_max[:-1]])
     ts = ts[inc_mask]
     signal = signal[inc_mask]
 

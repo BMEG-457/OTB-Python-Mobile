@@ -85,7 +85,11 @@
     "mvc_duration": 3.0,
     "threshold_frac": 0.3,
     "dismiss_delay": 2,
-    "progress_fps": 30
+    "progress_fps": 30,
+    "crosstalk_duration": 3.0,
+    "crosstalk_threshold_k": 3.0,
+    "verification_duration": 3.0,
+    "verification_active_fraction": 0.25
   },
 
   "features": {
@@ -153,6 +157,18 @@
   "session": {
     "muscle_groups": ["Biceps", "Quadriceps", "Forearm Flexors", "Tibialis Anterior", "Gastrocnemius", "Deltoid", "Other"],
     "exercise_types": ["Isometric MVC", "Dynamic Contraction", "Fatigue Protocol", "Free Movement", "Other"]
+  },
+
+  "longitudinal": {
+    "max_sessions": 200
+  },
+
+  "safety": {
+    "latency_warning_threshold_ms": 100,
+    "latency_rolling_window": 10,
+    "disconnect_warning_sec": 5,
+    "adc_rail_value": 32767,
+    "clipping_fraction_threshold": 0.01
   },
 
   "paths": {
