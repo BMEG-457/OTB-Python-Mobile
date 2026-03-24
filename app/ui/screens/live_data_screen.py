@@ -27,6 +27,8 @@ from app.ui.widgets.multi_track_plot import MultiTrackPlotWidget
 from app.ui.widgets.heatmap_widget import HeatmapWidget
 from app.ui.widgets.calibration_popup import CalibrationPopup
 from app.ui.widgets.session_metadata_popup import SessionMetadataPopup
+from app.ui.widgets.seniam_guide_popup import SENIAMGuidePopup
+from app.ui.widgets.crosstalk_popup import CrosstalkVerificationPopup
 from app.core import config as CFG
 
 
@@ -222,14 +224,25 @@ class LiveDataScreen(Screen):
         top_bar.add_widget(btn_back)
 
         self.btn_calibrate = Button(
-            text='Calibrate', size_hint=(0.13, 1), font_size=sp(15)
+            text='Calibrate', size_hint=(0.10, 1), font_size=sp(15)
         )
         self.btn_calibrate.bind(on_press=self._on_calibrate)
         self.btn_calibrate.disabled = True
         top_bar.add_widget(self.btn_calibrate)
 
+        btn_guide = Button(text='Guide', size_hint=(0.08, 1), font_size=sp(15))
+        btn_guide.bind(on_press=lambda x: SENIAMGuidePopup().open())
+        top_bar.add_widget(btn_guide)
+
+        self.btn_crosstalk = Button(
+            text='Crosstalk', size_hint=(0.10, 1), font_size=sp(14)
+        )
+        self.btn_crosstalk.bind(on_press=self._on_crosstalk)
+        self.btn_crosstalk.disabled = True
+        top_bar.add_widget(self.btn_crosstalk)
+
         self.btn_stream = Button(
-            text='Start Stream', size_hint=(0.15, 1),
+            text='Start Stream', size_hint=(0.13, 1),
             font_size=sp(15), background_color=CFG.BTN_STREAM_IDLE
         )
         self.btn_stream.bind(on_press=self._on_toggle_stream)
@@ -917,12 +930,36 @@ class LiveDataScreen(Screen):
         self.mvc_rms = mvc_rms
         self.is_calibrated = True
         self.btn_record.disabled = False
+        self.btn_crosstalk.disabled = False
         # Pass baseline RMS of active channel to metrics computer
         active_ch = self._get_active_channel_index()
         if baseline_rms is not None and active_ch < len(baseline_rms):
             self._metrics_computer.set_baseline(float(baseline_rms[active_ch]))
         self._set_bottom('Calibration complete.')
         self._set_status('Calibrated')
+
+    # ------------------------------------------------------------------
+    # Crosstalk verification
+    # ------------------------------------------------------------------
+
+    def _on_crosstalk(self, instance):
+        if not self.is_calibrated:
+            self._set_bottom('Calibrate first.')
+            return
+        popup = CrosstalkVerificationPopup(
+            baseline_rms=self.baseline_rms,
+            on_complete=self._on_crosstalk_complete,
+            on_sample_connect=self._register_calibration_callback,
+            on_sample_disconnect=self._unregister_calibration_callback,
+        )
+        popup.start()
+
+    def _on_crosstalk_complete(self, passed, flagged):
+        if passed:
+            self._set_bottom('Crosstalk check: PASS')
+        else:
+            ch_str = ', '.join(str(c + 1) for c in flagged[:5])
+            self._set_bottom(f'Crosstalk check: WARNING — Ch {ch_str}')
 
     # ------------------------------------------------------------------
     # Recording

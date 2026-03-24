@@ -11,12 +11,15 @@ from app.core import config as CFG
 
 
 class CalibrationPopup(Popup):
-    """Two-phase calibration popup: rest then MVC.
+    """Three-phase calibration popup: rest, MVC, then verification.
 
-    Collects EMG samples via on_sample callbacks during each phase, then
-    computes baseline_rms and mvc_rms per channel. Calls on_complete with
-    (baseline_rms, threshold, mvc_rms) as numpy arrays of shape (n_channels,)
-    when both phases are done.
+    Phase 1 (Rest): Collects baseline EMG at rest.
+    Phase 2 (MVC): Collects maximum voluntary contraction.
+    Phase 3 (Verify): Subject performs dorsiflexion; checks that activation
+        is spatially concentrated (not diffuse), confirming electrode placement.
+
+    Calls on_complete with (baseline_rms, threshold, mvc_rms) as numpy arrays
+    of shape (n_channels,) when all phases are done.
 
     Args:
         on_complete: callable(baseline_rms, threshold, mvc_rms).
@@ -37,7 +40,8 @@ class CalibrationPopup(Popup):
 
         self._rest_samples = []
         self._mvc_samples = []
-        self._current_phase = None  # 'rest' | 'mvc'
+        self._verify_samples = []
+        self._current_phase = None  # 'rest' | 'mvc' | 'verify'
 
         # Build content
         layout = BoxLayout(orientation='vertical', padding=16, spacing=12)
@@ -63,7 +67,7 @@ class CalibrationPopup(Popup):
     def _start_rest_phase(self):
         self._current_phase = 'rest'
         self._rest_samples = []
-        self.status_label.text = 'Phase 1 of 2: Rest'
+        self.status_label.text = 'Phase 1 of 3: Rest'
         self.instruction_label.text = 'Relax your muscle completely.'
         self.progress.value = 0
         self.on_sample_connect(self._collect_sample)
@@ -72,10 +76,55 @@ class CalibrationPopup(Popup):
     def _start_mvc_phase(self, dt=None):
         self._current_phase = 'mvc'
         self._mvc_samples = []
-        self.status_label.text = 'Phase 2 of 2: MVC'
+        self.status_label.text = 'Phase 2 of 3: MVC'
         self.instruction_label.text = 'Contract as hard as you can!'
         self.progress.value = 0
-        self._schedule_progress(CFG.CALIBRATION_MVC_DURATION, self._finish)
+        self._schedule_progress(CFG.CALIBRATION_MVC_DURATION, self._start_verify_phase)
+
+    def _start_verify_phase(self, dt=None):
+        self._current_phase = 'verify'
+        self._verify_samples = []
+        self.status_label.text = 'Phase 3 of 3: Verification'
+        self.instruction_label.text = 'Perform dorsiflexion now...'
+        self.progress.value = 0
+        self._schedule_progress(CFG.CALIBRATION_VERIFY_DURATION, self._evaluate_verification)
+
+    def _evaluate_verification(self, dt=None):
+        """Check whether activation during verification is spatially concentrated."""
+        if not self._verify_samples:
+            self.instruction_label.text = 'No data received during verification.'
+            Clock.schedule_once(lambda dt: self._finish(), CFG.CALIBRATION_DISMISS_DELAY)
+            return
+
+        all_data = np.concatenate(self._verify_samples, axis=1)
+        hd_channels = min(all_data.shape[0], CFG.HDSEMG_CHANNELS)
+        hd_data = all_data[:hd_channels]
+        rms_per_ch = np.sqrt(np.mean(hd_data ** 2, axis=1))
+
+        concentration = self.compute_concentration(rms_per_ch)
+
+        if concentration > CFG.CALIBRATION_VERIFY_ACTIVE_FRAC:
+            self.status_label.text = 'Verification: PASS'
+            self.status_label.color = (0.2, 0.9, 0.2, 1)
+            self.instruction_label.text = 'Activation pattern looks good!'
+        else:
+            self.status_label.text = 'Verification: WARNING'
+            self.status_label.color = (1.0, 0.6, 0.1, 1)
+            self.instruction_label.text = 'Diffuse activation — check electrode placement'
+
+        Clock.schedule_once(lambda dt: self._finish(), CFG.CALIBRATION_DISMISS_DELAY)
+
+    @staticmethod
+    def compute_concentration(rms_per_ch):
+        """Compute spatial concentration: fraction of total RMS in the top quarter of channels.
+
+        Returns a value in [0, 1]. Higher means more concentrated activation.
+        """
+        n = len(rms_per_ch)
+        sorted_rms = np.sort(rms_per_ch)[::-1]
+        top_quarter = sorted_rms[:max(1, n // 4)].sum()
+        total = sorted_rms.sum()
+        return float(top_quarter / total) if total > 0 else 0.0
 
     def _finish(self, dt=None):
         self.on_sample_disconnect(self._collect_sample)
@@ -103,6 +152,8 @@ class CalibrationPopup(Popup):
             self._rest_samples.append(data.copy())
         elif self._current_phase == 'mvc':
             self._mvc_samples.append(data.copy())
+        elif self._current_phase == 'verify':
+            self._verify_samples.append(data.copy())
 
     def _compute_rms(self, sample_list):
         if not sample_list:

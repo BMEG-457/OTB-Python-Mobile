@@ -85,7 +85,11 @@
     "mvc_duration": 3.0,
     "threshold_frac": 0.3,
     "dismiss_delay": 2,
-    "progress_fps": 30
+    "progress_fps": 30,
+    "crosstalk_duration": 3.0,
+    "crosstalk_threshold_k": 3.0,
+    "verification_duration": 3.0,
+    "verification_active_fraction": 0.25
   },
 
   "features": {
