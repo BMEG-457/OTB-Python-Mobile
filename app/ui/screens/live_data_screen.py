@@ -19,6 +19,7 @@ from app.managers.streaming_controller import StreamingController
 from app.processing.pipeline import get_pipeline
 from app.processing import filters
 from app.processing.iir_filter import StatefulIIRFilter
+from app.processing.live_metrics import LiveMetricsComputer
 from app.ui.widgets.emg_plot_widget import EMGPlotWidget
 from app.ui.widgets.multi_track_plot import MultiTrackPlotWidget
 from app.ui.widgets.heatmap_widget import HeatmapWidget
@@ -122,6 +123,10 @@ class LiveDataScreen(Screen):
         # Auto MAV channel selection + envelope
         self._auto_mav_channel = 0
         self._envelope_pending = None  # (samples,) envelope for selected channel
+
+        # Real-time metrics
+        self._metrics_computer = LiveMetricsComputer()
+        self._pending_metrics = None
 
         # Mode: 'basic' (clinical) or 'advanced' (researcher)
         self._mode = 'advanced'
@@ -292,7 +297,7 @@ class LiveDataScreen(Screen):
         root.add_widget(tab_bar)
 
         # ---- Content area (FloatLayout to overlay panels) ----
-        self._content = FloatLayout(size_hint=(1, 0.78))
+        self._content = FloatLayout(size_hint=(1, 0.70))
 
         # Single-channel plot (default view)
         tw = CFG.PLOT_TIME_WINDOW_PRESETS[self._time_window_idx]
@@ -322,6 +327,32 @@ class LiveDataScreen(Screen):
         self._content.add_widget(self.heatmap)
 
         root.add_widget(self._content)
+
+        # ---- Metrics bar ----
+        self._metrics_bar = BoxLayout(
+            orientation='horizontal', size_hint=(1, 0.08), padding=4, spacing=8
+        )
+        self._lbl_rms = Label(
+            text='RMS: --', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
+            size_hint=(0.25, 1),
+        )
+        self._lbl_mf = Label(
+            text='MF: -- Hz', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
+            size_hint=(0.25, 1),
+        )
+        self._lbl_fatigue = Label(
+            text='Fatigue: --', font_size=sp(14), color=(0.5, 0.5, 0.5, 1),
+            size_hint=(0.25, 1),
+        )
+        self._lbl_active_ch = Label(
+            text='Ch: --', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
+            size_hint=(0.25, 1),
+        )
+        self._metrics_bar.add_widget(self._lbl_rms)
+        self._metrics_bar.add_widget(self._lbl_mf)
+        self._metrics_bar.add_widget(self._lbl_fatigue)
+        self._metrics_bar.add_widget(self._lbl_active_ch)
+        root.add_widget(self._metrics_bar)
 
         # ---- Bottom status bar ----
         self.bottom_label = Label(
@@ -593,6 +624,8 @@ class LiveDataScreen(Screen):
     def _on_connected(self, dt):
         filters.reset_live_filters()
         self._envelope_filter.reset()
+        self._metrics_computer.reset()
+        self._pending_metrics = None
         self.receiver_thread = DataReceiverThread(
             device=self.device,
             client_socket=self.device.client_socket,
@@ -664,6 +697,13 @@ class LiveDataScreen(Screen):
                 envelope = self._envelope_filter(np.abs(hd))
                 self._envelope_pending = envelope[self._auto_mav_channel]
 
+            # Feed active channel samples to metrics computer
+            active_ch = self._get_active_channel_index()
+            if active_ch < data.shape[0]:
+                result = self._metrics_computer.update(data[active_ch])
+                if result is not None:
+                    self._pending_metrics = result
+
             # Contraction detection — store state for _ui_tick to read (no schedule_once)
             if self.is_calibrated and self.threshold is not None:
                 ch0_rms = float(np.sqrt(np.mean(data[0] ** 2)))
@@ -684,6 +724,16 @@ class LiveDataScreen(Screen):
         # Update contraction label (reads state set by receiver thread)
         self.contraction_label.text = self._contraction_text
         self.contraction_label.color = self._contraction_color
+
+        # Update metrics bar
+        m = self._pending_metrics
+        if m is not None:
+            self._lbl_rms.text = f'RMS: {m["rms"]:.1f}'
+            self._lbl_mf.text = f'MF: {m["median_freq"]:.1f} Hz'
+            fatigue = m['fatigue_rms'] or m['fatigue_mf']
+            self._lbl_fatigue.text = 'Fatigue: YES' if fatigue else 'Fatigue: No'
+            self._lbl_fatigue.color = (1, 0.3, 0.3, 1) if fatigue else (0.3, 1, 0.3, 1)
+            self._lbl_active_ch.text = f'Ch: {self._get_active_channel_index() + 1}'
 
         if self._active_tab == 'plot':
             self._render_plot_panel(data)
@@ -753,6 +803,15 @@ class LiveDataScreen(Screen):
         self.contraction_label.text = text
         self.contraction_label.color = color
 
+    def _get_active_channel_index(self):
+        """Return the channel index currently being displayed."""
+        _, n_tracks, agg = self._view_modes[self._view_mode_idx]
+        if agg == 'auto_mav':
+            return self._auto_mav_channel
+        if n_tracks == 1:
+            return self._single_channel_idx
+        return 0
+
     # ------------------------------------------------------------------
     # Calibration
     # ------------------------------------------------------------------
@@ -781,6 +840,10 @@ class LiveDataScreen(Screen):
         self.mvc_rms = mvc_rms
         self.is_calibrated = True
         self.btn_record.disabled = False
+        # Pass baseline RMS of active channel to metrics computer
+        active_ch = self._get_active_channel_index()
+        if baseline_rms is not None and active_ch < len(baseline_rms):
+            self._metrics_computer.set_baseline(float(baseline_rms[active_ch]))
         self._set_bottom('Calibration complete.')
         self._set_status('Calibrated')
 
