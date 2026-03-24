@@ -150,6 +150,11 @@
     "max_samples": 1000000
   },
 
+  "session": {
+    "muscle_groups": ["Biceps", "Quadriceps", "Forearm Flexors", "Tibialis Anterior", "Gastrocnemius", "Deltoid", "Other"],
+    "exercise_types": ["Isometric MVC", "Dynamic Contraction", "Fatigue Protocol", "Free Movement", "Other"]
+  },
+
   "paths": {
     "android_package_name": "org.bmeg457.otbemgapp",
     "data_dir_name": "OTB_EMG",

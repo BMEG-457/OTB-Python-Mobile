@@ -24,6 +24,7 @@ from app.ui.widgets.emg_plot_widget import EMGPlotWidget
 from app.ui.widgets.multi_track_plot import MultiTrackPlotWidget
 from app.ui.widgets.heatmap_widget import HeatmapWidget
 from app.ui.widgets.calibration_popup import CalibrationPopup
+from app.ui.widgets.session_metadata_popup import SessionMetadataPopup
 from app.core import config as CFG
 
 
@@ -858,6 +859,18 @@ class LiveDataScreen(Screen):
             self._start_recording()
 
     def _start_recording(self):
+        popup = SessionMetadataPopup(on_confirm=self._on_metadata_confirmed)
+        popup.open()
+
+    def _on_metadata_confirmed(self, metadata):
+        # Include calibration info if available
+        if self.is_calibrated and self.baseline_rms is not None:
+            metadata['calibration'] = {
+                'baseline_rms': self.baseline_rms.tolist(),
+                'mvc_rms': self.mvc_rms.tolist() if self.mvc_rms is not None else None,
+                'threshold_means': self.threshold.tolist() if self.threshold is not None else None,
+            }
+        self.recording_manager.set_metadata(metadata)
         self.recording_manager.start_recording()
         self.btn_record.text = 'Stop Record'
         self.btn_record.background_color = CFG.BTN_RECORD_SAVING
