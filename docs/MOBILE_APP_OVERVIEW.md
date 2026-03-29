@@ -37,7 +37,6 @@ app/
     features.py                 TKEO, burst, bilateral symmetry, fatigue, centroid, entropy
     pipeline.py                 Named pipeline registry
     live_metrics.py             Real-time rolling RMS, median frequency, fatigue flags
-    clipping_detector.py        ADC rail saturation detection
   ui/
     screens/
       selection_screen.py       Mode selector (Live Data / Data Analysis / Session History)
@@ -61,7 +60,6 @@ tests/
   test_processing.py            Filter pipeline smoke test
   test_autosave.py              Autosave write-through and crash recovery
   test_calibration_verification.py  3-phase calibration and concentration check
-  test_clipping_detector.py     ADC rail saturation detection
   test_crosstalk.py             Crosstalk threshold evaluation
   test_disconnect_detection.py  Socket timeout and disconnect warning
   test_latency_monitor.py       Rolling latency window and threshold
@@ -77,7 +75,9 @@ buildozer.spec                  Android build configuration
 - **Pending-data pattern.** Data arrives at 16 Hz; UI renders at 30 fps. `_on_data()` writes to `_pending_data`; `_ui_tick()` reads and clears it. Last-packet-wins — no queue buildup.
 - **Kivy Clock for thread safety.** All widget updates from background threads go through `Clock.schedule_once(fn, 0)`.
 - **Configuration-driven.** All magic numbers live in `config.json`. Never hardcode a threshold or frequency directly in source.
+- **Adapter channel remapping.** `config.json ["adapter"]["type"]` selects the ribbon cable. `config.py` loads the built-in channel map preset and derives `DEAD_CHANNELS` — the frozenset of logical channel indices that are always zero for the given adapter. The receiver thread applies the map after cropping to 64 channels and re-zeros dead channels after the filter pipeline to prevent IIR transients.
+- **Dead-channel awareness.** `DEAD_CHANNELS` is consumed by the heatmap (distinct purple-grey fill + × overlay), calibration (dead channels excluded from RMS, baseline, and concentration calculations), and the recording sidecar JSON (`dead_channels`, `active_channel_count` fields).
 - **Basic / Advanced modes.** The selection screen offers Basic (clinical) and Advanced (researcher) modes for live data. Basic mode hides channel selectors, time window, and view mode controls for a streamlined clinical workflow.
-- **Safety monitoring.** Real-time clipping detection, disconnect warnings, and latency tracking run alongside the data pipeline. Alerts surface in the UI without interrupting streaming.
+- **Safety monitoring.** Real-time disconnect warnings and latency tracking run alongside the data pipeline. Alerts surface in the UI without interrupting streaming.
 - **Autosave crash recovery.** Recordings are written through to a temp CSV during capture. On crash, orphaned autosave files are detected and recovered on next launch.
 - **Longitudinal tracking.** Session summaries (metrics + metadata) are appended to a JSON history file and visualized in the Session History screen.

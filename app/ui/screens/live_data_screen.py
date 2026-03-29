@@ -21,7 +21,6 @@ from app.processing.pipeline import get_pipeline
 from app.processing import filters
 from app.processing.iir_filter import StatefulIIRFilter
 from app.processing.live_metrics import LiveMetricsComputer
-from app.processing.clipping_detector import ClippingDetector
 from app.ui.widgets.emg_plot_widget import EMGPlotWidget
 from app.ui.widgets.multi_track_plot import MultiTrackPlotWidget
 from app.ui.widgets.heatmap_widget import HeatmapWidget
@@ -133,10 +132,6 @@ class LiveDataScreen(Screen):
         # Debug diagnostics (output via print → logcat)
         self._tick_count = 0
         self._last_tick_time = time.time()
-
-        # Clipping detection
-        self._clipping_detector = ClippingDetector()
-        self._pending_clipping = []
 
         # Real-time metrics
         self._metrics_computer = LiveMetricsComputer()
@@ -258,12 +253,6 @@ class LiveDataScreen(Screen):
         self.btn_record.disabled = True
         top_bar.add_widget(self.btn_record)
 
-        self.contraction_label = Label(
-            text='Contraction', color=CFG.CONTRACTION_INACTIVE,
-            size_hint_x=None, width=dp(80), font_size=sp(12),
-        )
-        top_bar.add_widget(self.contraction_label)
-
         self.battery_label = Label(
             text='Bat: --', color=(0.5, 0.5, 0.5, 1),
             size_hint_x=None, width=dp(65), font_size=sp(12),
@@ -384,23 +373,18 @@ class LiveDataScreen(Screen):
             text='MF: -- Hz', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
             size_hint=(0.20, 1),
         )
-        self._lbl_fatigue = Label(
-            text='Fatigue: --', font_size=sp(14), color=(0.5, 0.5, 0.5, 1),
+        self.contraction_label = Label(
+            text='Contraction', font_size=sp(14), color=CFG.CONTRACTION_INACTIVE,
             size_hint=(0.20, 1),
         )
         self._lbl_active_ch = Label(
             text='Ch: --', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
             size_hint=(0.20, 1),
         )
-        self._lbl_clipping = Label(
-            text='', font_size=sp(14), color=(1, 0.2, 0.2, 1),
-            size_hint=(0.20, 1),
-        )
         self._metrics_bar.add_widget(self._lbl_rms)
         self._metrics_bar.add_widget(self._lbl_mf)
-        self._metrics_bar.add_widget(self._lbl_fatigue)
+        self._metrics_bar.add_widget(self.contraction_label)
         self._metrics_bar.add_widget(self._lbl_active_ch)
-        self._metrics_bar.add_widget(self._lbl_clipping)
         root.add_widget(self._metrics_bar)
 
         # ---- Bottom status bar ----
@@ -629,7 +613,9 @@ class LiveDataScreen(Screen):
     def _go_back(self, instance):
         self._stop_battery_poll()
         if self.streaming_controller and self.streaming_controller.is_streaming:
-            self.streaming_controller.stop_streaming()
+            self._stop_stream()
+        else:
+            self.device.stop_server()
         self.manager.current = 'selection'
 
     # ------------------------------------------------------------------
@@ -721,6 +707,9 @@ class LiveDataScreen(Screen):
     def _stop_stream(self):
         if self.streaming_controller:
             self.streaming_controller.stop_streaming()
+        if self.receiver_thread:
+            self.receiver_thread.stop()
+        self.device.stop_server()
         self.btn_stream.text = 'Stream'
         self.btn_stream.background_color = CFG.BTN_STREAM_IDLE
         self.btn_stream.color = (1, 1, 1, 1)
@@ -752,11 +741,6 @@ class LiveDataScreen(Screen):
         # Recording — forward raw data directly on the receiver thread
         self.recording_manager.on_data_for_recording(stage, data)
 
-        # Clipping detection on raw (pre-filter) data
-        if stage == 'raw':
-            clipped = self._clipping_detector.check(data)
-            if clipped:
-                self._pending_clipping = clipped
 
         # Calibration listener
         if self._calibration_extra_callback is not None:
@@ -839,18 +823,8 @@ class LiveDataScreen(Screen):
         if m is not None:
             self._lbl_rms.text = f'RMS: {m["rms"]:.1f}'
             self._lbl_mf.text = f'MF: {m["median_freq"]:.1f} Hz'
-            fatigue = m['fatigue_rms'] or m['fatigue_mf']
-            self._lbl_fatigue.text = 'Fatigue: YES' if fatigue else 'Fatigue: No'
-            self._lbl_fatigue.color = (1, 0.3, 0.3, 1) if fatigue else (0.3, 1, 0.3, 1)
             self._lbl_active_ch.text = f'Ch: {self._get_active_channel_index() + 1}'
 
-        # Update clipping indicator
-        if self._pending_clipping:
-            ch_str = ', '.join(str(c + 1) for c in self._pending_clipping[:5])
-            self._lbl_clipping.text = f'CLIP: Ch {ch_str}'
-            self._pending_clipping = []
-        else:
-            self._lbl_clipping.text = ''
 
         if self._active_tab == 'plot':
             self._render_plot_panel(data, envelope_pending)

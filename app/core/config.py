@@ -38,6 +38,74 @@ HDSEMG_CHANNELS  = _raw['hdsemg']['channels']
 HDSEMG_GRID_ROWS = _raw['hdsemg']['grid_rows']
 HDSEMG_GRID_COLS = _raw['hdsemg']['grid_cols']
 
+# -- Adapter (ribbon cable) ---------------------------------------------------
+# "ad1x64sp"  — single 64-ch cable, 8x8 grid, no remap needed.
+# "ad2x32sp"  — two 32-ch cables side by side (each 8 rows × 4 cols).
+#               Adapter A (raw ch 0-31) = left half, Adapter B (raw ch 32-63) = right half.
+#
+# 32-ch adapter physical layout (1-indexed):
+#   [[1,9,17,25], [2,10,18,26], ... [8,16,24,32]]
+#
+# Dual adapter side-by-side → 8×8 physical grid.
+# 64-ch grid physical layout (1-indexed):
+#   [[64,56,48,40,32,24,16,8], ... [57,49,41,33,25,17,9,1]]
+#
+# For each physical position [row][col]:
+#   64-ch logical index (0-idx) = (7 - col) * 8 + (7 - row)
+#   raw adapter index (0-idx):
+#     col < 4 (adapter A): col * 8 + row
+#     col >= 4 (adapter B): 32 + (col - 4) * 8 + row
+#
+# Set "channel_map" to a 64-element list in config.json to override the built-in preset.
+# The map is indexed by logical channel (0-based): channel_map[logical] = raw_index.
+ADAPTER_TYPE = _raw.get('adapter', {}).get('type', 'ad1x64sp')
+_adapter_map_override = _raw.get('adapter', {}).get('channel_map', None)
+
+# Built-in presets — empirically verified channel maps per adapter type.
+_ADAPTER_PRESETS = {
+    'ad2x32sp': [
+        19, 18, 17, 16, 15, 14, 13, 12,  # logical 1-8
+         3,  2,  1,  0, 31, 30, 29, 28,  # logical 9-16
+        27, 26, 25, 24, 11, 10,  9,  8,  # logical 17-24
+         7,  6,  5,  4, 23, 22, 21, 20,  # logical 25-32
+        51, 50, 49, 48, 47, 46, 45, 44,  # logical 33-40
+        35, 34, 33, 32, 63, 62, 61, 60,  # logical 41-48
+        59, 58, 57, 56, 43, 42, 41, 40,  # logical 49-56
+        39, 38, 37, 36, 55, 54, 53, 52,  # logical 57-64
+    ],
+}
+
+if _adapter_map_override is not None:
+    ADAPTER_CHANNEL_MAP = list(_adapter_map_override)
+elif ADAPTER_TYPE in _ADAPTER_PRESETS:
+    ADAPTER_CHANNEL_MAP = list(_ADAPTER_PRESETS[ADAPTER_TYPE])
+else:
+    ADAPTER_CHANNEL_MAP = None  # no remap for ad1x64sp
+
+# Dead raw channel offsets per adapter type — device sends zeros on these pins
+# because the adapter connector does not make contact with them.
+# Offsets are relative to each 32-channel block: 4-11 within each block are unused.
+_ADAPTER_DEAD_RAW = {
+    'ad2x32sp': frozenset(range(4, 12)) | frozenset(range(36, 44)),
+}
+_dead_raw = _ADAPTER_DEAD_RAW.get(ADAPTER_TYPE, frozenset())
+if ADAPTER_CHANNEL_MAP is not None and _dead_raw:
+    DEAD_CHANNELS = frozenset(
+        i for i, raw in enumerate(ADAPTER_CHANNEL_MAP) if raw in _dead_raw
+    )
+else:
+    DEAD_CHANNELS = frozenset()
+
+# How dead cells are rendered on the heatmap. Only meaningful when DEAD_CHANNELS
+# is non-empty (i.e. ad2x32sp). None for ad1x64sp (no dead channels).
+# "removed" — dark purple-grey fill + × overlay + em-dash label (default)
+# "raw"     — rendered like a live cell; always appears cold since device sends 0
+# "demo"    — rendered at the mean RMS of all active channels
+ADAPTER_HEATMAP_MODE = (
+    _raw.get('adapter', {}).get('heatmap_mode', 'removed')
+    if DEAD_CHANNELS else None
+)
+
 # -- Filter parameters ---------------------------------------------------------
 BANDPASS_LOW_HZ           = _raw['filter']['bandpass_low_hz']
 BANDPASS_HIGH_HZ          = _raw['filter']['bandpass_high_hz']
@@ -143,7 +211,6 @@ LATENCY_WARNING_MS          = _raw['safety']['latency_warning_threshold_ms']
 LATENCY_ROLLING_WINDOW      = _raw['safety']['latency_rolling_window']
 DISCONNECT_WARNING_SEC      = _raw['safety']['disconnect_warning_sec']
 ADC_RAIL_VALUE              = _raw['safety']['adc_rail_value']
-CLIPPING_FRACTION_THRESHOLD = _raw['safety']['clipping_fraction_threshold']
 
 # -- Paths ---------------------------------------------------------------------
 ANDROID_PACKAGE_NAME   = _raw['paths']['android_package_name']

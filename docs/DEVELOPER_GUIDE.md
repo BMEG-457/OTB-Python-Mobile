@@ -28,8 +28,7 @@ OTB-Python-Mobile/
 │   │   ├── features.py         TKEO, burst, bilateral, fatigue, centroid, entropy
 │   │   ├── pipeline.py         Named pipeline registry
 │   │   ├── transforms.py       FFT helpers
-│   │   ├── live_metrics.py     Real-time rolling RMS, median frequency, fatigue flags
-│   │   └── clipping_detector.py ADC rail saturation detection
+│   │   └── live_metrics.py     Real-time rolling RMS, median frequency, fatigue flags
 │   └── ui/
 │       ├── screens/
 │       │   ├── selection_screen.py       Entry: Live Data | Data Analysis | Session History
@@ -60,7 +59,6 @@ OTB-Python-Mobile/
     ├── test_processing.py          End-to-end filter + feature pipeline (no device needed)
     ├── test_autosave.py            Autosave write-through and crash recovery
     ├── test_calibration_verification.py  3-phase calibration and concentration check
-    ├── test_clipping_detector.py   ADC rail saturation detection
     ├── test_crosstalk.py           Crosstalk threshold evaluation
     ├── test_disconnect_detection.py Socket timeout and disconnect warning
     └── test_latency_monitor.py     Rolling latency window and threshold
@@ -109,6 +107,7 @@ Key config sections:
 | Section | Key constants |
 |---|---|
 | `device` | `DEVICE_SAMPLE_RATE` (2000), `DEVICE_CHANNELS` (72), `DEVICE_PORT` (45454), `DEVICE_CONNECT_TIMEOUT` (15 s) |
+| `adapter` | `ADAPTER_TYPE` (`"ad1x64sp"` or `"ad2x32sp"`), `ADAPTER_CHANNEL_MAP` (64-element list or `None`), `DEAD_CHANNELS` (frozenset of always-zero logical indices) |
 | `filter` | `BANDPASS_LOW_HZ` (20), `BANDPASS_HIGH_HZ` (450), `NOTCH_FREQ_HZ` (60), `NOTCH_QUALITY` (30) |
 | `filter_coefficients` | `BANDPASS_4_B/A`, `BANDPASS_1_B/A`, `LOWPASS_10_4_B/A`, `NOTCH_60_B/A` |
 | `calibration` | `CALIBRATION_REST_DURATION` (3.0 s), `CALIBRATION_MVC_DURATION` (3.0 s), `CALIBRATION_THRESHOLD_FRAC` (0.3), `CROSSTALK_DURATION` (3.0 s), `CROSSTALK_THRESHOLD_K` (3.0), `CALIBRATION_VERIFY_DURATION` (3.0 s), `CALIBRATION_VERIFY_ACTIVE_FRAC` (0.25) |
@@ -117,7 +116,34 @@ Key config sections:
 | `recording` | `RECORDING_MAX_SAMPLES` (1,000,000) |
 | `session` | `SESSION_MUSCLE_GROUPS` (list), `SESSION_EXERCISE_TYPES` (list) |
 | `longitudinal` | `LONGITUDINAL_MAX_SESSIONS` (200) |
-| `safety` | `LATENCY_WARNING_MS` (100), `LATENCY_ROLLING_WINDOW` (10), `DISCONNECT_WARNING_SEC` (5), `ADC_RAIL_VALUE` (32767), `CLIPPING_FRACTION_THRESHOLD` (0.01) |
+| `safety` | `LATENCY_WARNING_MS` (100), `LATENCY_ROLLING_WINDOW` (10), `DISCONNECT_WARNING_SEC` (5), `ADC_RAIL_VALUE` (32767) |
+
+### Adapter configuration
+
+The `adapter` section of `config.json` controls ribbon cable channel remapping:
+
+```json
+"adapter": {
+  "type": "ad2x32sp",
+  "channel_map": null
+}
+```
+
+| Field | Value | Effect |
+|---|---|---|
+| `type` | `"ad1x64sp"` | No remap; all 64 channels used as-is; `heatmap_mode` ignored |
+| `type` | `"ad2x32sp"` | Loads built-in 64-element preset; derives `DEAD_CHANNELS`; `heatmap_mode` active |
+| `channel_map` | `null` | Use built-in preset for the selected type |
+| `channel_map` | `[…]` | 64-element override list (takes priority over preset) |
+| `heatmap_mode` | `"removed"` | Dead cells: dark purple-grey + × overlay + em-dash label (default) |
+| `heatmap_mode` | `"raw"` | Dead cells: rendered like live cells (always cold since device sends 0) |
+| `heatmap_mode` | `"demo"` | Dead cells: coloured at the mean RMS of all active channels |
+
+`DEAD_CHANNELS` is a `frozenset` of 0-based logical channel indices that always output zero for the active adapter. For `ad2x32sp`, this is the 16 channels whose raw data indices fall in offsets 4–11 of each 32-channel device block (raw indices 4–11 and 36–43). These correspond to device input pins that the ad2x32sp connector does not make contact with.
+
+`ADAPTER_HEATMAP_MODE` is `None` when `DEAD_CHANNELS` is empty (i.e. `ad1x64sp`); all three heatmap mode branches in `HeatmapWidget` are unreachable when the dead channel set is empty.
+
+**Adding a new adapter preset:** add an entry to `_ADAPTER_PRESETS` in `config.py` (64-element list, `map[logical_idx] = raw_idx`) and a corresponding entry in `_ADAPTER_DEAD_RAW` (frozenset of raw indices that are always zero). Set `"type"` in `config.json` to activate it.
 
 ---
 
@@ -193,14 +219,17 @@ Battery level is read via HTTP GET to `http://192.168.1.1/`. The response HTML i
 Sessantaquattro+ (TCP)
   → DataReceiverThread.run()  [daemon threading.Thread]
       recv loop accumulates bytes until expected_bytes (18000) available
-      struct.unpack big-endian signed 16-bit → reshape (samples, nch).T → (72, 125) float32
+      np.frombuffer big-endian int16 → reshape (samples, nch).T → (72, 125) float32
+
+      crop to 64 HD-EMG channels: all_ch[:64]
+      adapter remap (if ADAPTER_CHANNEL_MAP set): raw = raw[channel_map]
 
       on_stage('raw', raw)          — always emitted (recording needs it even when paused)
 
       if self.running:              — only when StreamingController.start_streaming() is active
-        Pipeline('filtered').run(raw)   → bandpass only   → on_stage('filtered', ...)
-        Pipeline('rectified').run(...)  → abs              → on_stage('rectified', ...)
-        Pipeline('final').run(raw)      → bandpass + notch + rectify  → on_stage('final', ...)
+        Pipeline('final').run(raw)  → bandpass + notch + rectify
+        dead channels re-zeroed     → final[dead_mask, :] = 0.0  (prevents IIR transients)
+        on_stage('final', final)
 
       on_stage callbacks:
         → recording_manager.on_data_for_recording(stage, data)
@@ -313,10 +342,6 @@ Note: timestamp preprocessing in `_preprocess_timestamps` now uses `np.maximum.a
 
 Call `set_baseline(rms)` after calibration. `update(samples)` returns a metrics dict or `None` if no boundary was crossed.
 
-### Clipping detection (`clipping_detector.py`)
-
-`ClippingDetector` checks raw (pre-filter) data for samples at `ADC_RAIL_VALUE` (±32767). Returns a list of channel indices where the clipping fraction exceeds `CLIPPING_FRACTION_THRESHOLD` (1%).
-
 ---
 
 ## 8. Calibration (`calibration_popup.py`)
@@ -371,7 +396,7 @@ Layout (vertical `BoxLayout`):
 | Disconnect banner | 0.05 | Red warning text (hidden when connected) |
 | Tab bar | 0.07 | EMG Plot toggle, Heatmap toggle, Time cycle button, Ch: input, View cycle button (Advanced mode only) |
 | Content | 0.70 | FloatLayout with three overlapping panels: `plot_single`, `plot_multi`, `heatmap` |
-| Metrics bar | 0.08 | RMS, median frequency, fatigue flag, active channel, clipping warning |
+| Metrics bar | 0.08 | RMS, median frequency, contraction indicator, active channel |
 | Bottom bar | 0.05 | Status/instruction label |
 
 The three content panels are stacked in the FloatLayout; visibility is controlled by setting `widget.opacity = 0` or `1`. Only one is visible at a time.
@@ -380,8 +405,7 @@ The three content panels are stacked in the FloatLayout; visibility is controlle
 
 **View modes** are defined in `_VIEW_MODES_BASIC` and `_VIEW_MODES_ADVANCED` (module-level lists of `(label, n_tracks, agg_fn)` tuples). The `'auto_mav'` sentinel triggers automatic channel selection based on highest activity. Cycling calls `_rebuild_multi_track()` when the track count changes.
 
-**Safety monitoring:** Three real-time monitors run during streaming:
-- `_clipping_detector` (`ClippingDetector`) — checks raw data for ADC rail saturation each packet
+**Safety monitoring:** Two real-time monitors run during streaming:
 - `_latency_window` (rolling deque) — tracks processing latency, warns if >100 ms
 - `DataReceiverThread.on_disconnect` callback — fires if no packet for >5 seconds
 
@@ -546,7 +570,6 @@ python -m unittest tests.test_networking
 python -m unittest tests.test_processing
 python -m unittest tests.test_autosave
 python -m unittest tests.test_calibration_verification
-python -m unittest tests.test_clipping_detector
 python -m unittest tests.test_crosstalk
 python -m unittest tests.test_disconnect_detection
 python -m unittest tests.test_latency_monitor
@@ -567,7 +590,6 @@ python -m unittest tests.test_latency_monitor
 | `test_processing.py` | 2 | Full filter pipeline shape/non-negativity on 72-channel data |
 | `test_autosave.py` | — | Autosave file creation, write-through integrity, crash recovery workflows, file rotation on overflow |
 | `test_calibration_verification.py` | — | 3-phase calibration flow, concentration computation, PASS/WARNING logic |
-| `test_clipping_detector.py` | — | ADC rail detection, fraction thresholding, multi-channel flagging |
 | `test_crosstalk.py` | — | Crosstalk threshold evaluation, flagged channel detection, multiple baseline scenarios |
 | `test_disconnect_detection.py` | — | Socket timeout → disconnect warning, latency thresholding, callback invocation |
 | `test_latency_monitor.py` | — | Rolling window latency computation, warning threshold logic |

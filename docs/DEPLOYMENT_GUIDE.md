@@ -352,7 +352,7 @@ Expanded from device-only constants to include all tuneable parameters and pre-c
 
 - Pipeline setup changed to use config-derived device command parameters (`CFG.DEVICE_FSAMP`, `CFG.DEVICE_NCH`, etc.) instead of hardcoded values.
 - Device command parameters read from `CFG` rather than hardcoded.
-- Added Basic/Advanced mode system, session metadata capture, crash recovery, real-time metrics, and safety monitoring (clipping, disconnect, latency).
+- Added Basic/Advanced mode system, session metadata capture, crash recovery, real-time metrics, and safety monitoring (disconnect, latency).
 
 ### 10.12 New files added in clinical_feedback branch
 
@@ -362,7 +362,6 @@ The following new files are included in the APK:
 |---|---|
 | `app/managers/session_history.py` | JSON persistence of longitudinal session summaries |
 | `app/processing/live_metrics.py` | Real-time rolling RMS, median frequency, fatigue flags |
-| `app/processing/clipping_detector.py` | ADC rail saturation detection |
 | `app/ui/screens/longitudinal_screen.py` | Session history viewer with trend charts |
 | `app/ui/widgets/crosstalk_popup.py` | Crosstalk verification popup |
 | `app/ui/widgets/session_metadata_popup.py` | Session metadata entry form |

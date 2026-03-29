@@ -299,12 +299,6 @@ The fraction of channels with RMS above the mean (or above calibration threshold
 
 ## 10. Safety Monitoring
 
-### Clipping detection (`ADC_RAIL_VALUE = 32767`, `CLIPPING_FRACTION_THRESHOLD = 0.01`)
-
-The Sessantaquattro+ outputs 16-bit signed integers. When the signal amplitude exceeds the ADC range, samples are clipped at ±32767. Clipping causes waveform distortion and invalidates all downstream analyses (RMS, frequency, onset detection).
-
-The detector flags a channel when more than 1% of samples in a packet are at the rail value. This threshold is low enough to catch intermittent clipping (e.g. from poor electrode contact) while avoiding false alarms from single-sample noise spikes. Clipping typically indicates electrode lift-off, excessive pressure, or cable movement artifacts [2].
-
 ### Disconnect detection (`DISCONNECT_WARNING_SEC = 5`)
 
 If no data packet is received for 5 seconds while streaming is active, the UI displays a disconnect warning. At 16 packets/second, 5 seconds represents 80 missed packets — well beyond normal WiFi jitter (typically <100 ms). A shorter threshold would cause false alarms during brief WiFi interference; a longer one would delay the user's awareness of a genuine disconnection.

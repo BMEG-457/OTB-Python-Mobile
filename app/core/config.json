@@ -23,6 +23,12 @@
     "grid_cols": 8
   },
 
+  "adapter": {
+    "type": "ad2x32sp",
+    "heatmap_mode": "removed",
+    "channel_map": null
+  },
+
   "filter": {
     "bandpass_low_hz": 20.0,
     "bandpass_high_hz": 450.0,
@@ -169,8 +175,7 @@
     "latency_warning_threshold_ms": 100,
     "latency_rolling_window": 10,
     "disconnect_warning_sec": 5,
-    "adc_rail_value": 32767,
-    "clipping_fraction_threshold": 0.01
+    "adc_rail_value": 32767
   },
 
   "paths": {

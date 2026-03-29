@@ -118,10 +118,16 @@ class CalibrationPopup(Popup):
     def compute_concentration(rms_per_ch):
         """Compute spatial concentration: fraction of total RMS in the top quarter of channels.
 
+        Dead channels (always-zero adapter pins) are excluded so they don't
+        inflate the denominator or dilute the concentration score.
+
         Returns a value in [0, 1]. Higher means more concentrated activation.
         """
-        n = len(rms_per_ch)
-        sorted_rms = np.sort(rms_per_ch)[::-1]
+        active_mask = np.array([i not in CFG.DEAD_CHANNELS
+                                for i in range(len(rms_per_ch))], dtype=bool)
+        active_rms = rms_per_ch[active_mask]
+        n = len(active_rms)
+        sorted_rms = np.sort(active_rms)[::-1]
         top_quarter = sorted_rms[:max(1, n // 4)].sum()
         total = sorted_rms.sum()
         return float(top_quarter / total) if total > 0 else 0.0
@@ -160,7 +166,12 @@ class CalibrationPopup(Popup):
             return None
         # Each element: (channels, samples). Stack along samples axis.
         stacked = np.concatenate(sample_list, axis=1)  # (channels, total_samples)
-        return np.sqrt(np.mean(stacked ** 2, axis=1))  # (channels,)
+        rms = np.sqrt(np.mean(stacked ** 2, axis=1))   # (channels,)
+        # Zero dead channels so they don't skew threshold or baseline estimates
+        for ch in CFG.DEAD_CHANNELS:
+            if ch < len(rms):
+                rms[ch] = 0.0
+        return rms
 
     def _schedule_progress(self, duration, next_fn):
         """Animate the progress bar over duration seconds, then call next_fn."""

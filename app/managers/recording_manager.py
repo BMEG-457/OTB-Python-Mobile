@@ -173,6 +173,7 @@ class RecordingManager:
             metadata = self.session_metadata
             if metadata is not None:
                 duration = self.recording_data[-1][0] if self.recording_data else 0.0
+                dead = sorted(CFG.DEAD_CHANNELS)
                 sidecar = {
                     **metadata,
                     'recording_file': os.path.basename(filename),
@@ -181,6 +182,9 @@ class RecordingManager:
                     'sample_rate': CFG.DEVICE_SAMPLE_RATE,
                     'duration_sec': round(duration, 3),
                     'saved_at': datetime.now().isoformat(),
+                    'adapter_type': CFG.ADAPTER_TYPE,
+                    'dead_channels': dead,
+                    'active_channel_count': num_channels - len(dead),
                 }
                 meta_filename = filename.replace('.csv', '_meta.json')
                 with open(meta_filename, 'w') as mf:

@@ -53,6 +53,13 @@ class DataReceiverThread(threading.Thread):
         self._disconnect_warned  = False
         self.on_disconnect       = None  # optional callback(elapsed_sec)
 
+        # Pre-compute adapter channel map as numpy array for fast fancy indexing
+        self._channel_map = (np.array(CFG.ADAPTER_CHANNEL_MAP, dtype=np.intp)
+                             if CFG.ADAPTER_CHANNEL_MAP is not None else None)
+        # Pre-compute dead channel index array for fast zeroing after pipeline
+        self._dead_mask = (np.array(sorted(CFG.DEAD_CHANNELS), dtype=np.intp)
+                           if CFG.DEAD_CHANNELS else None)
+
         try:
             self.client_socket.settimeout(_SOCKET_TIMEOUT)
         except Exception as e:
@@ -64,7 +71,9 @@ class DataReceiverThread(threading.Thread):
         samples_per_pkt = freq // _PACKET_SIZE_DIVISOR
         expected_bytes  = nch * 2 * samples_per_pkt
         print(f"[RECEIVER] Starting — {nch} ch @ {freq} Hz, "
-              f"{samples_per_pkt} samples/pkt, {expected_bytes} bytes/pkt")
+              f"{samples_per_pkt} samples/pkt, {expected_bytes} bytes/pkt, "
+              f"adapter={CFG.ADAPTER_TYPE}"
+              f"{' (remap active)' if self._channel_map is not None else ''}")
 
         buf = b''
 
@@ -84,11 +93,16 @@ class DataReceiverThread(threading.Thread):
                     buf       = buf[expected_bytes:]
 
                     # Zero-copy decode: big-endian int16 → float32 (no Python tuple)
-                    raw = (np.frombuffer(pkt_bytes, dtype='>i2')
-                           .astype(np.float32)
-                           .reshape(samples_per_pkt, nch)
-                           .T)  # shape (nchannels, samples_per_pkt)
-                    raw = raw[:CFG.HDSEMG_CHANNELS]  # keep only HD-sEMG channels
+                    all_ch = (np.frombuffer(pkt_bytes, dtype='>i2')
+                              .astype(np.float32)
+                              .reshape(samples_per_pkt, nch)
+                              .T)  # shape (nchannels, samples_per_pkt)
+
+                    raw = all_ch[:CFG.HDSEMG_CHANNELS]  # keep only HD-sEMG channels
+
+                    # Adapter remap: reorder channels to match logical 8×8 grid
+                    if self._channel_map is not None:
+                        raw = raw[self._channel_map]
 
                     self._pending_recv_time = time.time()
 
@@ -103,6 +117,10 @@ class DataReceiverThread(threading.Thread):
                             final = get_pipeline('final').run(raw)
                         except Exception:
                             final = raw
+                        # Re-zero dead channels: filter state on always-zero inputs
+                        # can produce tiny non-zero transients; clamp them out.
+                        if self._dead_mask is not None:
+                            final[self._dead_mask, :] = 0.0
                         self._pipeline_total_ms += (time.time() - t0) * 1000
                         self.on_stage('final', final)
 

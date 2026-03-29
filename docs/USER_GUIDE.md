@@ -19,7 +19,8 @@ EMG (electromyography) measures the electrical activity produced by skeletal mus
 ## Hardware Requirements
 
 - Sessantaquattro+ HD-sEMG device (OTBioelettronica)
-- 8×8 electrode array connected to the device
+- Ribbon cable adapter: **ad1x64sp** (64-ch, 8×8 grid, all channels active) or **ad2x32sp** (dual 32-ch, 8×8 grid, 48 of 64 channels active)
+- Electrode array(s) matched to the adapter
 - Android phone (Android 5.0 / API 21 or newer; landscape orientation)
 - WiFi network broadcast by the device (SSID typically "Sessantaquattro+")
 
@@ -123,6 +124,16 @@ A white ellipse highlight can mark the currently selected or auto-detected chann
 
 Electrode-to-grid mapping: column-major, bottom-left = channel 0. Channel index = col × 8 + (7 − row).
 
+**Dead channels (ad2x32sp adapter only):** When using the dual 32-channel adapter, 16 of the 64 grid cells are permanently inactive — the adapter connector does not make contact with those device input pins. Dead channels are excluded from calibration calculations regardless of display mode. The appearance of dead cells on the heatmap depends on the `heatmap_mode` setting in `config.json`:
+
+| Mode | Dead cell appearance |
+|------|----------------------|
+| `removed` (default) | Dark purple-grey fill, × overlay, em-dash (—) label — clearly marked as inactive |
+| `raw` | Rendered like a live cell at value 0 — always dark/cold, normal channel number label |
+| `demo` | Coloured at the mean activation of all working channels — visually fills in the gaps for demonstrations |
+
+This is a hardware limitation of the ad2x32sp adapter; switching to the ad1x64sp cable restores all 64 channels.
+
 ### 6. Battery Status
 
 The **Battery** label in the top bar shows the device battery percentage, queried via HTTP every 30 seconds. Colors: green (>50%), orange (20–50%), red (≤20%). "--" means no battery response was received.
@@ -138,7 +149,7 @@ Recording requires calibration to be complete first.
 
 **CSV format:** one row per sample; columns: `Timestamp, Channel_1, Channel_2, ..., Channel_64`. Only the 64 HD-EMG channels are saved (auxiliary channels 65–72 are excluded). Timestamps are seconds elapsed since the start of the recording.
 
-**Metadata sidecar:** A `<recording_name>_meta.json` file is saved alongside each CSV, containing the entered metadata and computed summary statistics (RMS, MAV, median frequency, fatigue flags, contraction count).
+**Metadata sidecar:** A `<recording_name>_meta.json` file is saved alongside each CSV, containing the entered metadata, computed summary statistics (RMS, MAV, median frequency, fatigue flags, contraction count), and adapter information (`adapter_type`, `dead_channels`, `active_channel_count`). When using the ad2x32sp adapter, `active_channel_count` will be 48 and `dead_channels` will list the 16 logical channel indices (0-based) that are permanently inactive.
 
 **Crash recovery:** If the app crashes during recording, the autosave file is detected on next launch and automatically recovered.
 
@@ -226,3 +237,5 @@ Tap **Export** to save all analysis results (TKEO, burst, fatigue, bilateral, ce
 | Bilateral Symmetry file browser doesn't open | File 1 not loaded | Load File 1 first, then press Bilateral Symmetry |
 | Session History is empty | No recordings with metadata saved yet | Record a session with metadata to populate history |
 | App crashes on launch | Storage permission not yet granted | Grant permission and restart |
+| 16 heatmap cells show × and never respond | Using ad2x32sp adapter | Expected — those 16 device input pins are not contacted by the adapter; 48 of 64 channels are active |
+| Calibration threshold seems too low | Dead channels pulling down MVC estimate | Dead channels are excluded from calibration automatically; ensure `"type": "ad2x32sp"` is set in config.json |

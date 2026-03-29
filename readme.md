@@ -8,9 +8,18 @@ Built with Kivy and NumPy — no scipy at runtime.
 
 ## Modes
 
-- **Live Data (Basic / Advanced)** — stream and visualize 64-channel HD-sEMG in real time, calibrate against baseline/MVC with verification, record sessions to CSV with metadata and autosave crash recovery. Basic (clinical) mode offers a simplified UI; Advanced (researcher) mode exposes all controls.
+- **Live Data (Basic / Advanced)** — stream and visualize HD-sEMG in real time, calibrate against baseline/MVC with verification, record sessions to CSV with metadata and autosave crash recovery. Basic (clinical) mode offers a simplified UI; Advanced (researcher) mode exposes all controls.
 - **Data Analysis** — load recorded CSV files and run TKEO activation timing, burst duration, fatigue detection, bilateral symmetry, centroid shift, and spatial non-uniformity analyses
 - **Session History** — view longitudinal trends across recording sessions, filter by subject or muscle group, and track metrics (peak RMS, median frequency, contraction count) over time
+
+## Adapter Support
+
+| Adapter | Channels | Grid | Notes |
+|---------|----------|------|-------|
+| ad1x64sp | 64 active | 8×8 | Default single cable; no remapping |
+| ad2x32sp | 48 active | 8×8 (16 dead) | Dual 32-ch cables side-by-side; 8 device input pins per connector are not contacted by the adapter, leaving raw offsets 4–11 in each 32-ch block permanently zero |
+
+Set `"adapter": {"type": "ad2x32sp"}` in `config.json` to activate the built-in channel map and dead-cell rendering. Dead cells appear as dark purple-grey with a × overlay on the heatmap and are excluded from calibration statistics and recording metadata.
 
 ---
 
@@ -101,7 +110,7 @@ app/
   data/                 DataReceiverThread (TCP recv loop, pipeline dispatch, disconnect detection)
   managers/             RecordingManager (autosave, metadata), StreamingController, SessionHistoryManager
   processing/           iir_filter.py, filters.py, features.py, pipeline.py,
-                        live_metrics.py, clipping_detector.py
+                        live_metrics.py
   ui/screens/           SelectionScreen, LiveDataScreen (basic/advanced modes),
                         DataAnalysisScreen, AnalysisPlotScreen, LongitudinalScreen
   ui/widgets/           EMGPlotWidget, MultiTrackPlotWidget, HeatmapWidget, CalibrationPopup,
@@ -111,7 +120,7 @@ tests/                  test_iir_filter.py, test_filters.py, test_features.py,
                         test_pipeline.py, test_device.py, test_recording_manager.py,
                         test_data_receiver.py, test_networking.py, test_processing.py,
                         test_autosave.py, test_calibration_verification.py,
-                        test_clipping_detector.py, test_crosstalk.py,
+                        test_crosstalk.py,
                         test_disconnect_detection.py, test_latency_monitor.py
 bin/                    Pre-built APK
 docs/                   All documentation (including IFU)
@@ -137,7 +146,6 @@ python -m unittest tests.test_networking
 python -m unittest tests.test_processing
 python -m unittest tests.test_autosave
 python -m unittest tests.test_calibration_verification
-python -m unittest tests.test_clipping_detector
 python -m unittest tests.test_crosstalk
 python -m unittest tests.test_disconnect_detection
 python -m unittest tests.test_latency_monitor
