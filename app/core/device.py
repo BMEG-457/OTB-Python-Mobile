@@ -84,6 +84,9 @@ class SessantaquattroPlus:
                 "Connect to the device's network and try again."
             )
 
+        # Clean up any leftover sockets from a previous session
+        self.stop_server()
+
         try:
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -103,6 +106,8 @@ class SessantaquattroPlus:
                     "Ensure the device is powered on and in pairing mode."
                 )
 
+        except ConnectionError:
+            raise
         except socket.error as e:
             if self.server_socket:
                 self.server_socket.close()

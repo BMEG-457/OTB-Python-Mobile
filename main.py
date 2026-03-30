@@ -17,6 +17,7 @@ from app.ui.screens.selection_screen import SelectionScreen
 from app.ui.screens.live_data_screen import LiveDataScreen
 from app.ui.screens.data_analysis_screen import DataAnalysisScreen
 from app.ui.screens.analysis_plot_screen import AnalysisPlotScreen
+from app.ui.screens.longitudinal_screen import LongitudinalScreen
 
 
 def _is_android():
@@ -32,13 +33,20 @@ class OTBApp(App):
         emulator = EMULATOR_BUILD or os.getenv("SESSANTAQUATTRO_EMULATOR") == "1"
         self.device = SessantaquattroPlus(emulator_mode=emulator)
 
-        sm = ScreenManager()
-        sm.add_widget(SelectionScreen(name='selection'))
-        sm.add_widget(LiveDataScreen(name='live_data', device=self.device))
-        sm.add_widget(DataAnalysisScreen(name='data_analysis'))
-        sm.add_widget(AnalysisPlotScreen(name='analysis_plot'))
+        self._sm = ScreenManager()
+        self._sm.add_widget(SelectionScreen(name='selection'))
 
-        return sm
+        # Defer heavy screen construction to after the first frame so the
+        # SelectionScreen renders immediately instead of showing a black screen.
+        Clock.schedule_once(self._add_remaining_screens, 0)
+
+        return self._sm
+
+    def _add_remaining_screens(self, dt):
+        self._sm.add_widget(LiveDataScreen(name='live_data', device=self.device))
+        self._sm.add_widget(DataAnalysisScreen(name='data_analysis'))
+        self._sm.add_widget(AnalysisPlotScreen(name='analysis_plot'))
+        self._sm.add_widget(LongitudinalScreen(name='longitudinal'))
 
     def on_start(self):
         """Request WRITE_EXTERNAL_STORAGE on Android 9/10 if not already granted."""

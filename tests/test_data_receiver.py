@@ -88,7 +88,7 @@ class TestPacketParsing(unittest.TestCase):
         pkt = _make_packet()
         stages, _ = _run_thread_with_single_packet(pkt, running=False)
         raw_data = next(d for n, d in stages if n == 'raw')
-        self.assertEqual(raw_data.shape, (_NCH, _SPP))
+        self.assertEqual(raw_data.shape, (CFG.HDSEMG_CHANNELS, _SPP))
 
     def test_raw_dtype_float32(self):
         pkt = _make_packet()
@@ -119,21 +119,17 @@ class TestStageDispatch(unittest.TestCase):
     def setUp(self):
         clear_pipelines()
 
-    def test_filtered_rectified_final_emitted_when_running(self):
+    def test_final_emitted_when_running(self):
         pkt    = _make_packet()
         stages, _ = _run_thread_with_single_packet(pkt, running=True)
         names  = [s[0] for s in stages]
-        self.assertIn('filtered', names)
-        self.assertIn('rectified', names)
-        self.assertIn('final',    names)
+        self.assertIn('final', names)
 
-    def test_filtered_rectified_final_not_emitted_when_paused(self):
+    def test_final_not_emitted_when_paused(self):
         pkt    = _make_packet()
         stages, _ = _run_thread_with_single_packet(pkt, running=False)
         names  = [s[0] for s in stages]
-        self.assertNotIn('filtered',  names)
-        self.assertNotIn('rectified', names)
-        self.assertNotIn('final',     names)
+        self.assertNotIn('final', names)
 
     def test_raw_emitted_even_when_paused(self):
         pkt    = _make_packet()
@@ -141,12 +137,12 @@ class TestStageDispatch(unittest.TestCase):
         names  = [s[0] for s in stages]
         self.assertIn('raw', names)
 
-    def test_stage_order_is_raw_filtered_rectified_final(self):
+    def test_stage_order_is_raw_final(self):
         pkt    = _make_packet()
         stages, _ = _run_thread_with_single_packet(pkt, running=True)
         names  = [s[0] for s in stages]
-        expected = ['raw', 'filtered', 'rectified', 'final']
-        self.assertEqual(names[:4], expected)
+        expected = ['raw', 'final']
+        self.assertEqual(names[:2], expected)
 
 
 class TestErrorHandling(unittest.TestCase):

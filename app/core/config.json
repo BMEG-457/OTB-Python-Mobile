@@ -1,6 +1,6 @@
 {
   "build": {
-    "emulator_build": true
+    "emulator_build": false
   },
 
   "device": {
@@ -21,6 +21,12 @@
     "channels": 64,
     "grid_rows": 8,
     "grid_cols": 8
+  },
+
+  "adapter": {
+    "type": "ad2x32sp",
+    "heatmap_mode": "removed",
+    "channel_map": null
   },
 
   "filter": {
@@ -85,7 +91,11 @@
     "mvc_duration": 3.0,
     "threshold_frac": 0.3,
     "dismiss_delay": 2,
-    "progress_fps": 30
+    "progress_fps": 30,
+    "crosstalk_duration": 3.0,
+    "crosstalk_threshold_k": 3.0,
+    "verification_duration": 3.0,
+    "verification_active_fraction": 0.25
   },
 
   "features": {
@@ -120,7 +130,9 @@
     "heatmap_cold_rgb": [0.12, 0.12, 0.12],
     "heatmap_hot_rgb": [0.0, 0.90, 0.40],
     "btn_stream_idle": [0.1, 0.6, 0.3, 1.0],
+    "btn_stream_active": [0.2, 0.8, 0.4, 1.0],
     "btn_record_idle": [0.6, 0.1, 0.1, 1.0],
+    "btn_record_active": [0.9, 0.2, 0.2, 1.0],
     "btn_record_saving": [0.8, 0.4, 0.0, 1.0],
     "btn_live_mode": [0.1, 0.6, 0.4, 1.0],
     "btn_analysis_mode": [0.2, 0.4, 0.7, 1.0],
@@ -148,6 +160,22 @@
 
   "recording": {
     "max_samples": 1000000
+  },
+
+  "session": {
+    "muscle_groups": ["Biceps", "Quadriceps", "Forearm Flexors", "Tibialis Anterior", "Gastrocnemius", "Deltoid", "Other"],
+    "exercise_types": ["Isometric MVC", "Dynamic Contraction", "Fatigue Protocol", "Free Movement", "Other"]
+  },
+
+  "longitudinal": {
+    "max_sessions": 200
+  },
+
+  "safety": {
+    "latency_warning_threshold_ms": 100,
+    "latency_rolling_window": 10,
+    "disconnect_warning_sec": 5,
+    "adc_rail_value": 32767
   },
 
   "paths": {

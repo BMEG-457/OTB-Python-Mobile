@@ -17,46 +17,58 @@ OTB-Python-Mobile/
 │   │   ├── device.py           SessantaquattroPlus: TCP server, command encoding, battery
 │   │   └── paths.py            get_data_dir() / get_recordings_dir() — Android-aware
 │   ├── data/
-│   │   └── data_receiver.py    DataReceiverThread: recv loop, pipeline dispatch
+│   │   └── data_receiver.py    DataReceiverThread: recv loop, pipeline dispatch, disconnect detection
 │   ├── managers/
-│   │   ├── recording_manager.py    RecordingManager: accumulate + async CSV write
-│   │   └── streaming_controller.py StreamingController: thread flag + Clock schedule
+│   │   ├── recording_manager.py    RecordingManager: autosave, metadata sidecars, session history
+│   │   ├── streaming_controller.py StreamingController: thread flag + Clock schedule
+│   │   └── session_history.py      SessionHistoryManager: JSON persistence of session summaries
 │   ├── processing/
 │   │   ├── iir_filter.py       lfilter, filtfilt, find_peaks, resample_signal, StatefulIIRFilter
 │   │   ├── filters.py          butter_bandpass, notch, rectify; init/reset live filters
 │   │   ├── features.py         TKEO, burst, bilateral, fatigue, centroid, entropy
 │   │   ├── pipeline.py         Named pipeline registry
-│   │   └── transforms.py       FFT helpers
+│   │   ├── transforms.py       FFT helpers
+│   │   └── live_metrics.py     Real-time rolling RMS, median frequency, fatigue flags
 │   └── ui/
 │       ├── screens/
-│       │   ├── selection_screen.py       Entry: Live Data | Data Analysis buttons
-│       │   ├── live_data_screen.py       Live streaming screen (746 lines)
-│       │   ├── data_analysis_screen.py   Offline analysis screen (857 lines)
-│       │   └── analysis_plot_screen.py   Analysis result plot screen
+│       │   ├── selection_screen.py       Entry: Live Data | Data Analysis | Session History
+│       │   ├── live_data_screen.py       Live streaming screen (basic/advanced modes)
+│       │   ├── data_analysis_screen.py   Offline analysis screen
+│       │   ├── analysis_plot_screen.py   Analysis result plot screen
+│       │   └── longitudinal_screen.py    Session history viewer with trend charts
 │       └── widgets/
 │           ├── emg_plot_widget.py        Single-channel Kivy canvas plot
 │           ├── multi_track_plot.py       N-track stacked canvas plot
-│           ├── heatmap_widget.py         8×8 electrode heatmap
-│           └── calibration_popup.py      Two-phase timed calibration popup
+│           ├── heatmap_widget.py         8×8 electrode heatmap (gridlines, labels, highlight)
+│           ├── calibration_popup.py      Three-phase timed calibration popup
+│           ├── crosstalk_popup.py        Crosstalk verification popup
+│           ├── session_metadata_popup.py Session metadata entry form
+│           ├── seniam_guide_popup.py     SENIAM electrode placement guide
+│           └── trend_plot_widget.py      Canvas-based line+marker trend chart
 ├── scripts/
 │   └── compute_filter_coeffs.py   Offline scipy-based coefficient generator
 └── tests/
-    ├── test_iir_filter.py        Pure-numpy IIR filter implementations
-    ├── test_filters.py           butter_bandpass, notch, rectify, live filters
-    ├── test_features.py          Basic EMG features and all post-session analyses
-    ├── test_pipeline.py          ProcessingPipeline and registry
-    ├── test_device.py            Command encoding, channel/frequency lookup, network check
-    ├── test_recording_manager.py Recording state, data capture, overflow, CSV export
-    ├── test_data_receiver.py     Packet parsing, stage dispatch, socket lifecycle
-    ├── test_networking.py        TCP server/client handshake (no device needed)
-    └── test_processing.py        End-to-end filter + feature pipeline (no device needed)
+    ├── test_iir_filter.py          Pure-numpy IIR filter implementations
+    ├── test_filters.py             butter_bandpass, notch, rectify, live filters
+    ├── test_features.py            Basic EMG features and all post-session analyses
+    ├── test_pipeline.py            ProcessingPipeline and registry
+    ├── test_device.py              Command encoding, channel/frequency lookup, network check
+    ├── test_recording_manager.py   Recording state, data capture, overflow, CSV export
+    ├── test_data_receiver.py       Packet parsing, stage dispatch, socket lifecycle
+    ├── test_networking.py          TCP server/client handshake (no device needed)
+    ├── test_processing.py          End-to-end filter + feature pipeline (no device needed)
+    ├── test_autosave.py            Autosave write-through and crash recovery
+    ├── test_calibration_verification.py  3-phase calibration and concentration check
+    ├── test_crosstalk.py           Crosstalk threshold evaluation
+    ├── test_disconnect_detection.py Socket timeout and disconnect warning
+    └── test_latency_monitor.py     Rolling latency window and threshold
 ```
 
 ---
 
 ## 2. Entry Point (`main.py`)
 
-`OTBApp.build()` creates one `SessantaquattroPlus` instance and a `ScreenManager` with four screens. The device object is passed into `LiveDataScreen` at construction; all other screens are device-independent.
+`OTBApp.build()` creates one `SessantaquattroPlus` instance and a `ScreenManager` with five screens. The device object is passed into `LiveDataScreen` at construction; all other screens are device-independent.
 
 ```python
 class OTBApp(App):
@@ -68,6 +80,7 @@ class OTBApp(App):
         sm.add_widget(LiveDataScreen(name='live_data', device=self.device))
         sm.add_widget(DataAnalysisScreen(name='data_analysis'))
         sm.add_widget(AnalysisPlotScreen(name='analysis_plot'))
+        sm.add_widget(LongitudinalScreen(name='longitudinal'))
         return sm
 
     def on_start(self):
@@ -94,12 +107,43 @@ Key config sections:
 | Section | Key constants |
 |---|---|
 | `device` | `DEVICE_SAMPLE_RATE` (2000), `DEVICE_CHANNELS` (72), `DEVICE_PORT` (45454), `DEVICE_CONNECT_TIMEOUT` (15 s) |
+| `adapter` | `ADAPTER_TYPE` (`"ad1x64sp"` or `"ad2x32sp"`), `ADAPTER_CHANNEL_MAP` (64-element list or `None`), `DEAD_CHANNELS` (frozenset of always-zero logical indices) |
 | `filter` | `BANDPASS_LOW_HZ` (20), `BANDPASS_HIGH_HZ` (450), `NOTCH_FREQ_HZ` (60), `NOTCH_QUALITY` (30) |
 | `filter_coefficients` | `BANDPASS_4_B/A`, `BANDPASS_1_B/A`, `LOWPASS_10_4_B/A`, `NOTCH_60_B/A` |
-| `calibration` | `CALIBRATION_REST_DURATION` (3.0 s), `CALIBRATION_MVC_DURATION` (3.0 s), `CALIBRATION_THRESHOLD_FRAC` (0.3) |
+| `calibration` | `CALIBRATION_REST_DURATION` (3.0 s), `CALIBRATION_MVC_DURATION` (3.0 s), `CALIBRATION_THRESHOLD_FRAC` (0.3), `CROSSTALK_DURATION` (3.0 s), `CROSSTALK_THRESHOLD_K` (3.0), `CALIBRATION_VERIFY_DURATION` (3.0 s), `CALIBRATION_VERIFY_ACTIVE_FRAC` (0.25) |
 | `features` | `FEATURE_K_THRESHOLD` (8.0), `FEATURE_BACKTRACK_K` (3.0), `FEATURE_FATIGUE_RMS_THRESHOLD` (0.317), etc. |
-| `ui` | `RENDER_FPS` (30), `HEATMAP_BUFFER_SAMPLES` (100), `BATTERY_POLL_INTERVAL` (30 s) |
+| `ui` | `RENDER_FPS` (30), `HEATMAP_BUFFER_SAMPLES` (100), `BATTERY_POLL_INTERVAL` (30 s), `BTN_STREAM_ACTIVE`, `BTN_RECORD_ACTIVE` |
 | `recording` | `RECORDING_MAX_SAMPLES` (1,000,000) |
+| `session` | `SESSION_MUSCLE_GROUPS` (list), `SESSION_EXERCISE_TYPES` (list) |
+| `longitudinal` | `LONGITUDINAL_MAX_SESSIONS` (200) |
+| `safety` | `LATENCY_WARNING_MS` (100), `LATENCY_ROLLING_WINDOW` (10), `DISCONNECT_WARNING_SEC` (5), `ADC_RAIL_VALUE` (32767) |
+
+### Adapter configuration
+
+The `adapter` section of `config.json` controls ribbon cable channel remapping:
+
+```json
+"adapter": {
+  "type": "ad2x32sp",
+  "channel_map": null
+}
+```
+
+| Field | Value | Effect |
+|---|---|---|
+| `type` | `"ad1x64sp"` | No remap; all 64 channels used as-is; `heatmap_mode` ignored |
+| `type` | `"ad2x32sp"` | Loads built-in 64-element preset; derives `DEAD_CHANNELS`; `heatmap_mode` active |
+| `channel_map` | `null` | Use built-in preset for the selected type |
+| `channel_map` | `[…]` | 64-element override list (takes priority over preset) |
+| `heatmap_mode` | `"removed"` | Dead cells: dark purple-grey + × overlay + em-dash label (default) |
+| `heatmap_mode` | `"raw"` | Dead cells: rendered like live cells (always cold since device sends 0) |
+| `heatmap_mode` | `"demo"` | Dead cells: coloured at the mean RMS of all active channels |
+
+`DEAD_CHANNELS` is a `frozenset` of 0-based logical channel indices that always output zero for the active adapter. For `ad2x32sp`, this is the 16 channels whose raw data indices fall in offsets 4–11 of each 32-channel device block (raw indices 4–11 and 36–43). These correspond to device input pins that the ad2x32sp connector does not make contact with.
+
+`ADAPTER_HEATMAP_MODE` is `None` when `DEAD_CHANNELS` is empty (i.e. `ad1x64sp`); all three heatmap mode branches in `HeatmapWidget` are unreachable when the dead channel set is empty.
+
+**Adding a new adapter preset:** add an entry to `_ADAPTER_PRESETS` in `config.py` (64-element list, `map[logical_idx] = raw_idx`) and a corresponding entry in `_ADAPTER_DEAD_RAW` (frozenset of raw indices that are always zero). Set `"type"` in `config.json` to activate it.
 
 ---
 
@@ -175,14 +219,17 @@ Battery level is read via HTTP GET to `http://192.168.1.1/`. The response HTML i
 Sessantaquattro+ (TCP)
   → DataReceiverThread.run()  [daemon threading.Thread]
       recv loop accumulates bytes until expected_bytes (18000) available
-      struct.unpack big-endian signed 16-bit → reshape (samples, nch).T → (72, 125) float32
+      np.frombuffer big-endian int16 → reshape (samples, nch).T → (72, 125) float32
+
+      crop to 64 HD-EMG channels: all_ch[:64]
+      adapter remap (if ADAPTER_CHANNEL_MAP set): raw = raw[channel_map]
 
       on_stage('raw', raw)          — always emitted (recording needs it even when paused)
 
       if self.running:              — only when StreamingController.start_streaming() is active
-        Pipeline('filtered').run(raw)   → bandpass only   → on_stage('filtered', ...)
-        Pipeline('rectified').run(...)  → abs              → on_stage('rectified', ...)
-        Pipeline('final').run(raw)      → bandpass + notch + rectify  → on_stage('final', ...)
+        Pipeline('final').run(raw)  → bandpass + notch + rectify
+        dead channels re-zeroed     → final[dead_mask, :] = 0.0  (prevents IIR transients)
+        on_stage('final', final)
 
       on_stage callbacks:
         → recording_manager.on_data_for_recording(stage, data)
@@ -223,11 +270,11 @@ Each pipeline stage receives and returns `np.ndarray` of shape `(n_channels, n_s
 
 | Thread | What it does |
 |---|---|
-| Main (Kivy) | UI construction, `_ui_tick`, all widget updates |
-| Receiver (`DataReceiverThread`) | `socket.recv()` loop, pipeline dispatch, writes `_pending_data` — defined in `app/data/data_receiver.py` |
+| Main (Kivy) | UI construction, `_ui_tick`, all widget updates, safety alert rendering |
+| Receiver (`DataReceiverThread`) | `socket.recv()` loop, pipeline dispatch, writes `_pending_data`, disconnect detection — defined in `app/data/data_receiver.py` |
 | Connection daemon | `device.start_server()` + `send_command()`; marshals result back via `Clock.schedule_once` |
 | Battery daemon | `device.get_battery_level()` HTTP query |
-| Save daemon | `recording_manager.save_recording_to_csv()` CSV write |
+| Save daemon | `recording_manager.save_recording_to_csv()` CSV write + metadata sidecar + session history |
 | Analysis daemon | Each feature analysis function in `data_analysis_screen.py` |
 
 All background-to-UI results use:
@@ -235,7 +282,7 @@ All background-to-UI results use:
 Clock.schedule_once(lambda dt: update_ui(result), 0)
 ```
 
-The receiver thread is **never restarted**. `StreamingController` sets `receiver_thread.running = False` to pause data feeding (the thread blocks in `socket.recv()` but drops packets when `running` is False). A new `DataReceiverThread` is created each time the user presses Start Stream, but `threading.Thread` can only be started once — the old thread must have exited before a new one is created. In practice, once the socket closes the recv loop exits.
+The receiver thread is **never restarted**. `StreamingController` sets `receiver_thread.running = False` to pause data feeding (the thread blocks in `socket.recv()` but drops packets when `running` is False). A new `DataReceiverThread` is created each time the user presses Stream, but `threading.Thread` can only be started once — the old thread must have exited before a new one is created. In practice, once the socket closes the recv loop exits.
 
 ---
 
@@ -262,7 +309,7 @@ python scripts/compute_filter_coeffs.py --fs 4000
 
 `lfilter(b, a, x)` — Direct Form II Transposed, causal. Supports 1-D signals and `(channels, samples)` arrays by looping over channels.
 
-`filtfilt(b, a, x)` — Zero-phase forward+backward filter with reflect padding of length `3 × max(len(a), len(b))`. Falls back to causal `lfilter` if the signal is shorter than the pad length.
+`filtfilt(b, a, x)` — Zero-phase forward+backward filter with mirror padding of length `3 × (max(len(a), len(b)) - 1)`. Uses `_lfilter_zi()` to compute initial conditions for steady-state output and `_lfilter_ic()` to apply the filter with initial conditions. Falls back to causal `lfilter` if the signal is shorter than the minimum pad length.
 
 `find_peaks(x, height, distance)` — Greedy local maximum detection: collects all strict local maxima above `height`, then iterates highest-first and suppresses neighbours within `distance` samples. Returns `(indices, {})` matching scipy's interface.
 
@@ -284,15 +331,27 @@ Separate instances ensure the two bandpass pipelines do not share state. Call `f
 
 Post-session analyses use `filtfilt` (zero-phase, non-causal). The same coefficient arrays are used, but applied in batch to entire recordings rather than sample-by-sample.
 
+Note: timestamp preprocessing in `_preprocess_timestamps` now uses `np.maximum.accumulate()` to ensure strict monotonicity, fixing a bug where non-monotonic sequences could pass through.
+
+### Real-time metrics (`live_metrics.py`)
+
+`LiveMetricsComputer` maintains a circular buffer (configurable window, default 1000 samples) and computes metrics at `FEATURE_STEP_DURATION` boundaries (200 samples = 100 ms steps):
+- **RMS** on the current window
+- **Median frequency** via FFT + cumulative sum search
+- **Fatigue flags**: `fatigue_rms` (RMS drops below baseline threshold) and `fatigue_mf` (median frequency slope < `FEATURE_FATIGUE_MF_THRESHOLD` over last 10 windows)
+
+Call `set_baseline(rms)` after calibration. `update(samples)` returns a metrics dict or `None` if no boundary was crossed.
+
 ---
 
 ## 8. Calibration (`calibration_popup.py`)
 
-The `CalibrationPopup` is a Kivy `Popup` that runs a two-phase protocol driven by `Clock.schedule_interval`:
+The `CalibrationPopup` is a Kivy `Popup` that runs a three-phase protocol driven by `Clock.schedule_interval`:
 
 1. **Rest phase** (3.0 s) — registers `_calibration_extra_callback` via `on_sample_connect`; collects raw stage packets into `_rest_samples`.
 2. **MVC phase** (3.0 s) — same callback, collects into `_mvc_samples`.
-3. **Computation:**
+3. **Verification phase** (3.0 s) — collects into `_verify_samples`. Subject performs dorsiflexion. The popup evaluates spatial concentration of activation.
+4. **Computation:**
    ```
    rest_data  = concatenated rest packets (n_channels, n_rest_samples)
    mvc_data   = concatenated mvc packets  (n_channels, n_mvc_samples)
@@ -300,9 +359,20 @@ The `CalibrationPopup` is a Kivy `Popup` that runs a two-phase protocol driven b
    mvc_rms      = sqrt(mean(mvc_data²))            shape (n_channels,)
    threshold    = baseline_rms + 0.3 × (mvc_rms − baseline_rms)
    ```
-4. Emits `on_complete(baseline_rms, threshold, mvc_rms)` to `LiveDataScreen`.
+5. **Verification evaluation:**
+   ```
+   verify_rms = sqrt(mean(verify_data²))           shape (n_channels,)
+   concentration = sum(top_quarter_channels_rms) / sum(all_channels_rms)
+   PASS if concentration > CALIBRATION_VERIFY_ACTIVE_FRAC (0.25)
+   ```
+   `compute_concentration(rms_per_ch)` is a static method that returns a float in [0, 1] indicating spatial focus.
+6. Emits `on_complete(baseline_rms, threshold, mvc_rms)` to `LiveDataScreen`. Verification result (PASS/WARNING) is displayed in the popup.
 
 `LiveDataScreen._on_data()` feeds raw packets to the calibration callback directly on the receiver thread (no Clock call). The popup accumulates lists and concatenates at the end to avoid repeated array allocation.
+
+### Crosstalk Verification (`crosstalk_popup.py`)
+
+`CrosstalkVerificationPopup` is an optional post-calibration check. The subject performs plantar flexion (antagonist movement) for `CROSSTALK_DURATION` seconds. The popup computes per-channel RMS during the test and compares to the rest-phase baseline. Channels where `test_rms > baseline_rms + CROSSTALK_THRESHOLD_K × baseline_rms` are flagged. Result: PASS (no flagged channels) or WARNING (lists flagged channels).
 
 ---
 
@@ -312,7 +382,9 @@ All screens are `kivy.uix.screenmanager.Screen` subclasses added to a single `Sc
 
 ### SelectionScreen
 
-Minimal screen. Two buttons: "Live Data" → `'live_data'`; "Data Analysis" → `'data_analysis'`.
+Three buttons: "Live Data Viewing" → mode popup → `'live_data'`; "Data Analysis" → `'data_analysis'`; "Session History" → `'longitudinal'`.
+
+The "Live Data Viewing" button opens a popup with two choices: **Basic (Clinical)** and **Advanced (Researcher)**. The selected mode calls `LiveDataScreen.set_mode(mode)` before navigating.
 
 ### LiveDataScreen
 
@@ -320,16 +392,30 @@ Layout (vertical `BoxLayout`):
 
 | Region | Height fraction | Contents |
 |---|---|---|
-| Top bar | 0.10 | Back, Calibrate, Start Stream, Start Record, contraction label, battery label, status label |
-| Tab bar | 0.07 | EMG Plot toggle, Heatmap toggle, Time cycle button, Ch: input, View cycle button |
-| Content | 0.78 | FloatLayout with three overlapping panels: `plot_single`, `plot_multi`, `heatmap` |
+| Top bar | 0.10 | Back, Guide, Calibrate, Crosstalk, Stream, Record, contraction label, battery label, latency label, status label |
+| Disconnect banner | 0.05 | Red warning text (hidden when connected) |
+| Tab bar | 0.07 | EMG Plot toggle, Heatmap toggle, Time cycle button, Ch: input, View cycle button (Advanced mode only) |
+| Content | 0.70 | FloatLayout with three overlapping panels: `plot_single`, `plot_multi`, `heatmap` |
+| Metrics bar | 0.08 | RMS, median frequency, contraction indicator, active channel |
 | Bottom bar | 0.05 | Status/instruction label |
 
 The three content panels are stacked in the FloatLayout; visibility is controlled by setting `widget.opacity = 0` or `1`. Only one is visible at a time.
 
-**View modes** are defined in `_VIEW_MODES` (module-level list of `(label, n_tracks, agg_fn)` tuples). Cycling calls `_rebuild_multi_track()` when the track count changes, which creates a new `MultiTrackPlotWidget` and replaces the old one.
+**Basic / Advanced modes:** `set_mode(mode)` switches between `'basic'` and `'advanced'`. `_apply_mode()` hides/shows UI controls accordingly. Basic mode uses `_VIEW_MODES_BASIC` (Auto MAV only); Advanced mode uses `_VIEW_MODES_ADVANCED` (Auto MAV + all multi-track views).
 
-**Changing number of view modes:** add an entry to `_VIEW_MODES` and implement an aggregation function `fn(data) -> (n_tracks, samples)` where `data` is `(≥64, samples)`.
+**View modes** are defined in `_VIEW_MODES_BASIC` and `_VIEW_MODES_ADVANCED` (module-level lists of `(label, n_tracks, agg_fn)` tuples). The `'auto_mav'` sentinel triggers automatic channel selection based on highest activity. Cycling calls `_rebuild_multi_track()` when the track count changes.
+
+**Safety monitoring:** Two real-time monitors run during streaming:
+- `_latency_window` (rolling deque) — tracks processing latency, warns if >100 ms
+- `DataReceiverThread.on_disconnect` callback — fires if no packet for >5 seconds
+
+**Real-time metrics:** `_metrics_computer` (`LiveMetricsComputer`) computes rolling RMS, median frequency, and fatigue flags. Results are stored in `_pending_metrics` and rendered each UI tick.
+
+**Session metadata:** On record start, `SessionMetadataPopup` collects date, subject ID, muscle group, exercise type, and notes. Metadata is passed to `RecordingManager.set_metadata()`.
+
+**Crash recovery:** `on_enter()` checks for orphaned autosave files and auto-recovers them.
+
+**Changing number of view modes:** add an entry to `_VIEW_MODES_ADVANCED` and implement an aggregation function `fn(data) -> (n_tracks, samples)` where `data` is `(≥64, samples)`.
 
 ### DataAnalysisScreen
 
@@ -361,6 +447,21 @@ File loading runs in a daemon thread; `_ts1`, `_data1` (and `_ts2`, `_data2` for
 
 Displays a static EMG signal from a loaded recording. `DataAnalysisScreen._show_plot()` calls `plot_screen.set_data(data, timestamps, filename)` then sets `manager.current = 'analysis_plot'`. The screen provides a `StaticEMGPlotWidget` (Kivy canvas line rendering) with on-screen controls for channel selection, bandpass filter, notch filter, rectify, and envelope. It is a signal inspector, not a feature-analysis result viewer.
 
+### LongitudinalScreen
+
+Session history viewer with trend visualization.
+
+Layout:
+- Top bar (8%): Back button + "Session History" title
+- Filter bar (7%): Subject and Muscle `Spinner` widgets + Refresh button
+- Trend chart (45%): `TrendPlotWidget` showing selected metric vs. session
+- Metric selector (7%): Buttons for Peak RMS / Median Freq / Contractions
+- Session list (33%): `ScrollView` with session cards
+
+Data is loaded from `SessionHistoryManager` on screen enter. The filter spinners are populated from unique values in the history. `_apply_filter()` filters sessions by subject and muscle group and updates the chart and list. `_set_metric(metric_key)` switches the trend plot metric.
+
+Session cards display: date, muscle group, exercise type, subject ID, duration, and metric values.
+
 ---
 
 ## 10. Visualization Widgets
@@ -369,15 +470,23 @@ All widgets use Kivy's `canvas` API directly — no matplotlib or pyqtgraph.
 
 ### EMGPlotWidget (`emg_plot_widget.py`)
 
-Single-channel rolling waveform. Buffer is `display_samples` long (default 4000 = 2 s at 2000 Hz) implemented as a circular buffer with a write pointer (no `np.roll` allocation). On `render()`, the buffer is linearised, downsampled by `downsample` (default 4 → 1000 rendered points), scaled to a peak-hold y-axis range (expands to accommodate new extremes, never shrinks), and assigned to a single `canvas.Line` instruction. Call `reset_scale()` at stream start to clear the peak-hold range.
+Single-channel rolling waveform. Buffer is `display_samples` long (default 4000 = 2 s at 2000 Hz) implemented as a circular buffer with a write pointer (no `np.roll` allocation). On `render()`, the buffer is linearised from a display-aligned read pointer (`_display_read`), downsampled by `downsample` (default 4 → 1000 rendered points), scaled to a peak-hold y-axis range (expands to accommodate new extremes, never shrinks), and assigned to a single `canvas.Line` instruction. Call `reset_scale()` at stream start to clear the peak-hold range.
+
+The display read pointer advances in downsample-aligned steps only (`_samples_pending` tracks remainder samples). This ensures averaged display points maintain consistent y-values as they scroll left.
 
 ### MultiTrackPlotWidget (`multi_track_plot.py`)
 
 N independent rolling plots stacked vertically. Pre-allocates one `Color` + one `Line` canvas instruction per track at construction. `update_track(i, samples)` and `render()` update `.points` and `Color.rgba` without creating new canvas objects — critical for avoiding Android garbage collection pauses.
 
+Each track maintains its own display-aligned read pointer (`_display_reads[idx]`) and pending sample counter. Downsampling uses block-average decimation (reshape + mean) instead of naive skip, providing anti-aliased rendering.
+
 ### HeatmapWidget (`heatmap_widget.py`)
 
-8×8 grid of 64 `(Color, Rectangle)` pairs. `update(normalized_rms)` takes a `(64,)` array with values in `[0, 1]` and linearly interpolates each channel's color between `HEATMAP_COLD_RGB = (0.12, 0.12, 0.12)` and `HEATMAP_HOT_RGB = (0.0, 0.90, 0.40)`.
+8×8 grid of 64 `(Color, Rectangle)` pairs with grid lines, channel number labels, and optional channel highlight. `update(normalized_rms)` takes a `(64,)` array with values in `[0, 1]` and linearly interpolates each channel's color between `HEATMAP_COLD_RGB = (0.12, 0.12, 0.12)` and `HEATMAP_HOT_RGB = (0.0, 0.90, 0.40)`.
+
+Grid lines (dark gray) separate rows and columns. Each cell displays its 1-based channel number using `CoreLabel` textures (dynamically sized based on cell dimensions). `set_highlight(channel_idx)` draws a white ellipse outline on the specified cell; `clear_highlight()` removes it.
+
+The heatmap is inactive (no color updates) before calibration. After calibration, colors are scaled relative to calibration MVC values.
 
 Channel-to-grid mapping:
 ```python
@@ -386,7 +495,23 @@ channel_idx = col * 8 + (7 - row)   # col, row in 0..7; bottom-left = channel 0
 
 ### CalibrationPopup (`calibration_popup.py`)
 
-Kivy `Popup` with a progress bar driven by `Clock.schedule_interval`. Two phases share the same timer logic; only the target sample list and prompt text change between phases.
+Kivy `Popup` with a progress bar driven by `Clock.schedule_interval`. Three phases share the same timer logic; only the target sample list and prompt text change between phases. Phase 3 (verification) evaluates spatial concentration via `compute_concentration()`.
+
+### CrosstalkVerificationPopup (`crosstalk_popup.py`)
+
+Post-calibration popup that prompts plantar flexion and compares per-channel RMS to the rest-phase baseline. Channels exceeding `baseline + CROSSTALK_THRESHOLD_K × baseline` are flagged. Emits `on_complete(passed, flagged_channels)`.
+
+### SessionMetadataPopup (`session_metadata_popup.py`)
+
+Modal form collecting date, subject ID, muscle group (`Spinner`), exercise type (`Spinner`), and notes. Spinner options are populated from `CFG.SESSION_MUSCLE_GROUPS` and `CFG.SESSION_EXERCISE_TYPES`. Emits `on_confirm(metadata_dict)`.
+
+### SENIAMGuidePopup (`seniam_guide_popup.py`)
+
+Scrollable popup displaying SENIAM electrode placement guidelines for the tibialis anterior, including anatomical landmarks, array positioning, skin preparation, and a pre-session checklist.
+
+### TrendPlotWidget (`trend_plot_widget.py`)
+
+Canvas-based line+marker chart. `set_data(x_labels, y_values, y_label)` draws connected data points with circular markers, 3 horizontal grid lines, Y-axis min/mid/max labels, smart X-axis label sampling, and a rotated Y-axis title. Auto-scales with padding. Shows an empty-state label when no data is provided.
 
 ---
 
@@ -394,9 +519,19 @@ Kivy `Popup` with a progress bar driven by `Clock.schedule_interval`. Two phases
 
 `RecordingManager` accumulates raw stage data as a Python list of `(timestamp, channel_data)` tuples, where `timestamp` is seconds elapsed since `recording_start_time` and `channel_data` is a `(64,)` float32 array (first `HDSEMG_CHANNELS` channels only — auxiliary channels excluded). When recording stops, `save_recording_to_csv()` writes a timestamped CSV in a daemon thread.
 
+**Autosave write-through:** On `start_recording()`, a temp CSV file (`_autosave_YYYYMMDD_HHMMSS.csv`) is opened and samples are written in real time. On normal save, the autosave file is renamed to the final filename. If autosave file creation fails, recording falls back to in-memory-only mode.
+
+**Session metadata:** `set_metadata(metadata)` stores a metadata dict before recording. On save, a JSON sidecar file (`<recording_name>_meta.json`) is written alongside the CSV with the metadata and computed summary statistics. The session summary is also appended to the longitudinal history via `SessionHistoryManager`.
+
+**Crash recovery:** `find_orphaned_autosaves()` (static) discovers `_autosave_*.csv` files in the recordings directory. `recover_autosave(filename)` renames them to permanent recordings.
+
 **CSV filename format:** `recording_YYYYMMDD_HHMMSS.csv`
 
 **Overflow callback:** if the list length reaches `RECORDING_MAX_SAMPLES` (1,000,000 samples), `on_overflow()` is called. `LiveDataScreen` uses this to auto-stop recording and show a message.
+
+### Session History (`session_history.py`)
+
+`SessionHistoryManager` persists a JSON array of session summaries in `session_history.json`. Each summary is computed by `compute_session_summary(data, metadata)` and includes per-channel RMS/MAV, best channel, median frequency, fatigue flags, and contraction count. Writes use atomic temp-file + rename for crash safety. Query helpers: `get_sessions_for_muscle(muscle)`, `get_sessions_for_subject(subject_id)`. History is trimmed to `LONGITUDINAL_MAX_SESSIONS` entries.
 
 ---
 
@@ -433,21 +568,31 @@ python -m unittest tests.test_recording_manager
 python -m unittest tests.test_data_receiver
 python -m unittest tests.test_networking
 python -m unittest tests.test_processing
+python -m unittest tests.test_autosave
+python -m unittest tests.test_calibration_verification
+python -m unittest tests.test_crosstalk
+python -m unittest tests.test_disconnect_detection
+python -m unittest tests.test_latency_monitor
 ```
 
 ### Test coverage summary
 
 | File | Classes | What is tested |
 |---|---|---|
-| `test_iir_filter.py` | 5 | `lfilter`, `filtfilt`, `find_peaks`, `resample_signal`, `StatefulIIRFilter` |
+| `test_iir_filter.py` | 5 | `lfilter`, `filtfilt` (with initial conditions), `find_peaks`, `resample_signal`, `StatefulIIRFilter` |
 | `test_filters.py` | 4 | `butter_bandpass`, `notch`, `rectify`, live filter init/reset/isolation |
-| `test_features.py` | 8 | `rms`, `mav`, `integrated_emg`, `median_frequency_window`, `_preprocess_timestamps`, TKEO, burst, bilateral symmetry, fatigue, centroid shift, spatial non-uniformity |
+| `test_features.py` | 8 | `rms`, `mav`, `integrated_emg`, `median_frequency_window`, `_preprocess_timestamps` (monotonicity fix), TKEO, burst, bilateral symmetry, fatigue, centroid shift, spatial non-uniformity |
 | `test_pipeline.py` | 2 | `ProcessingPipeline` stage execution, named registry isolation |
 | `test_device.py` | 5 | Channel/frequency lookup, command bit encoding, network check, `send_command`, `start_server` |
-| `test_recording_manager.py` | 5 | State machine, 64-channel capture, relative timestamps, overflow, CSV header and row count |
-| `test_data_receiver.py` | 4 | Packet byte decoding, stage dispatch gated by `running`, timeout survival, split-packet reassembly |
+| `test_recording_manager.py` | 5 | State machine, 64-channel capture, relative timestamps, overflow, CSV header and row count, metadata sidecars, session history integration |
+| `test_data_receiver.py` | 4 | Packet byte decoding, stage dispatch gated by `running`, timeout survival, split-packet reassembly, disconnect detection |
 | `test_networking.py` | 2 | Loopback TCP handshake, connection timeout, `stop_server` cleanup |
 | `test_processing.py` | 2 | Full filter pipeline shape/non-negativity on 72-channel data |
+| `test_autosave.py` | — | Autosave file creation, write-through integrity, crash recovery workflows, file rotation on overflow |
+| `test_calibration_verification.py` | — | 3-phase calibration flow, concentration computation, PASS/WARNING logic |
+| `test_crosstalk.py` | — | Crosstalk threshold evaluation, flagged channel detection, multiple baseline scenarios |
+| `test_disconnect_detection.py` | — | Socket timeout → disconnect warning, latency thresholding, callback invocation |
+| `test_latency_monitor.py` | — | Rolling window latency computation, warning threshold logic |
 
 ---
 
@@ -478,14 +623,20 @@ python -m unittest tests.test_processing
 |---|---|
 | ADC | Analog-to-digital converter; converts muscle voltage to 16-bit integer |
 | APK | Android application package |
+| Autosave | Write-through temp CSV created during recording for crash recovery |
 | Buildozer | Build tool that invokes python-for-android (p4a) to create APKs |
 | Canvas | Kivy's low-level drawing API; `Color`, `Line`, `Rectangle` instructions |
+| Clipping | ADC rail saturation — signal exceeds ±32767 range |
 | Clock | Kivy's event scheduler; `Clock.schedule_once` and `schedule_interval` run on the main thread |
+| Crosstalk | Unintended pickup of signals from adjacent muscles |
 | HD-sEMG | High-density surface electromyography; an 8×8 grid of 64 surface electrodes |
+| MAV | Mean absolute value of EMG signal amplitude |
 | MVC | Maximum voluntary contraction; used as 100% activation reference |
 | NDK | Android Native Development Kit; needed to cross-compile C extensions |
 | p4a | python-for-android; cross-compiles Python + deps to ARM |
 | Pipeline | Named ordered list of processing functions applied to data |
+| SENIAM | Surface Electromyography for the Non-Invasive Assessment of Muscles; European guidelines for electrode placement |
+| Sidecar | JSON metadata file saved alongside a recording CSV |
 | TKEO | Teager-Kaiser Energy Operator; Ψ(x[n]) = x[n]² − x[n-1]·x[n+1] |
 | StatefulIIRFilter | `iir_filter.py` class that maintains filter state across packets for live streaming |
 | WSL2 | Windows Subsystem for Linux version 2; Linux kernel inside Windows |

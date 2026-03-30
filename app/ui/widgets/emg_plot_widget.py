@@ -18,6 +18,8 @@ class EMGPlotWidget(Widget):
     - xs array pre-computed on size change (not every frame)
     - pts array pre-allocated once; only ys filled each frame
     - .tolist() replaces list() for ~5x faster numpy→Python list conversion
+    - Display read pointer advances only in downsample-aligned steps so that
+      averaged display points maintain exact y-values as they scroll left
     """
 
     def __init__(self, channel_index=CFG.PLOT_CHANNEL_INDEX,
@@ -32,6 +34,12 @@ class EMGPlotWidget(Widget):
         # Circular buffer — write-pointer avoids np.roll on every packet
         self._buffer    = np.zeros(display_samples)
         self._buf_write = 0
+        self._update_count = 0  # debug counter
+
+        # Display-aligned read pointer: advances only in multiples of
+        # downsample so averaging windows stay phase-locked across frames.
+        self._display_read = 0
+        self._samples_pending = 0  # raw samples not yet consumed by display
 
         # Pre-allocated render scratch buffer (linearised view of circular buf)
         self._render_buf = np.empty(display_samples)
@@ -82,6 +90,11 @@ class EMGPlotWidget(Widget):
 
         new = data[self.channel_index]
         n   = len(new)
+
+        self._update_count += 1
+        if self._update_count % 30 == 0:
+            print(f"[DEBUG] plot: n={n} write={self._buf_write} "
+                  f"read={self._display_read} pending={self._samples_pending}")
         cap = self._display_samples
         end = self._buf_write + n
 
@@ -97,6 +110,16 @@ class EMGPlotWidget(Widget):
             self._buffer[self._buf_write:] = new[:split]
             self._buffer[:n - split]       = new[split:]
             self._buf_write = n - split
+
+        # Advance display read pointer in downsample-aligned steps only.
+        # This keeps averaging windows phase-locked so displayed points
+        # maintain their y-values as they scroll left.
+        ds = self._downsample
+        self._samples_pending += n
+        steps = self._samples_pending // ds
+        if steps > 0:
+            self._display_read = (self._display_read + steps * ds) % cap
+            self._samples_pending -= steps * ds
 
     def reset_scale(self):
         """Reset peak-hold y-axis range (call on stream start)."""
@@ -116,13 +139,21 @@ class EMGPlotWidget(Widget):
             self._line.points = []
             return
 
-        # Linearise circular buffer into pre-allocated scratch (no allocation)
-        idx = self._buf_write
+        # Linearise circular buffer from the display-aligned read pointer.
+        # Because _display_read advances only in multiples of _downsample,
+        # the block-average windows below always cover the same raw samples
+        # for a given display position — so points keep their y-values as
+        # they scroll left instead of being recomputed each frame.
+        idx = self._display_read
         cap = self._display_samples
         self._render_buf[: cap - idx] = self._buffer[idx:]
         self._render_buf[cap - idx:]  = self._buffer[:idx]
 
-        buf = self._render_buf[::self._downsample]  # view, no copy
+        # Block-average decimation (anti-aliased)
+        n_usable = self._n_pts * self._downsample
+        buf = self._render_buf[:n_usable].reshape(
+            self._n_pts, self._downsample
+        ).mean(axis=1)
 
         # Expand peak-hold range (only grows, never shrinks)
         self._y_min = min(self._y_min, buf.min())

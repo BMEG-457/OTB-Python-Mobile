@@ -252,7 +252,7 @@ set SESSANTAQUATTRO_EMULATOR=1
 python main.py
 ```
 
-Press **Start Stream** in the app, then within 10 seconds (the connect timeout):
+Press **Stream** in the app, then within 10 seconds (the connect timeout):
 
 ```cmd
 python emulator.py
@@ -266,7 +266,7 @@ The emulator connects to the app's TCP server and sends synthetic data.
 2. Clean build and install (see sections 4 and 6).
 3. Connect phone and PC to the same WiFi network.
 4. On the phone: **Settings > WiFi > tap the network > IP address** — note the phone IP.
-5. Open the app on the phone, tap **Live Data**, press **Start Stream**.
+5. Open the app on the phone, tap **Live Data**, press **Stream**.
 6. Within 10 seconds, on PC:
    ```bash
    python emulator.py --host <phone-ip>
@@ -352,8 +352,41 @@ Expanded from device-only constants to include all tuneable parameters and pre-c
 
 - Pipeline setup changed to use config-derived device command parameters (`CFG.DEVICE_FSAMP`, `CFG.DEVICE_NCH`, etc.) instead of hardcoded values.
 - Device command parameters read from `CFG` rather than hardcoded.
+- Added Basic/Advanced mode system, session metadata capture, crash recovery, real-time metrics, and safety monitoring (disconnect, latency).
 
-### 10.12 `buildozer.spec`: API level 28, legacy storage
+### 10.12 New files added in clinical_feedback branch
+
+The following new files are included in the APK:
+
+| File | Purpose |
+|---|---|
+| `app/managers/session_history.py` | JSON persistence of longitudinal session summaries |
+| `app/processing/live_metrics.py` | Real-time rolling RMS, median frequency, fatigue flags |
+| `app/ui/screens/longitudinal_screen.py` | Session history viewer with trend charts |
+| `app/ui/widgets/crosstalk_popup.py` | Crosstalk verification popup |
+| `app/ui/widgets/session_metadata_popup.py` | Session metadata entry form |
+| `app/ui/widgets/seniam_guide_popup.py` | SENIAM electrode placement guide |
+| `app/ui/widgets/trend_plot_widget.py` | Canvas-based trend chart widget |
+
+All new files use only `kivy` and `numpy` — no additional build dependencies.
+
+### 10.13 Modified files in clinical_feedback branch
+
+| File | Key changes |
+|---|---|
+| `app/core/config.json` / `config.py` | Added calibration verification, crosstalk, session, longitudinal, safety, and UI color config parameters |
+| `app/data/data_receiver.py` | Disconnect detection callback, latency timestamp tracking |
+| `app/managers/recording_manager.py` | Autosave write-through, metadata JSON sidecars, session history integration |
+| `app/processing/iir_filter.py` | Improved `filtfilt` with initial conditions (`_lfilter_zi`, `_lfilter_ic`) |
+| `app/processing/features.py` | Fixed timestamp monotonicity bug in `_preprocess_timestamps` |
+| `app/ui/screens/selection_screen.py` | Added Session History button and Basic/Advanced mode selection popup |
+| `app/ui/widgets/calibration_popup.py` | Extended from 2-phase to 3-phase (verification) |
+| `app/ui/widgets/heatmap_widget.py` | Grid lines, channel labels, highlight, inactive pre-calibration |
+| `app/ui/widgets/emg_plot_widget.py` | Display-aligned read pointer for stable scrolling |
+| `app/ui/widgets/multi_track_plot.py` | Block-average decimation, per-track display alignment |
+| `main.py` | Registered `LongitudinalScreen` |
+
+### 10.14 `buildozer.spec`: API level 28, legacy storage
 
 ```ini
 android.api = 28
@@ -362,7 +395,7 @@ android.minapi = 21
 
 Targeting API 28 (Android 9) gives the app "legacy storage" behaviour automatically on Android 10 (`requestLegacyExternalStorage` is implied, avoiding buildozer's manifest attribute injection mechanism). This allows writing to `/sdcard/Documents/OTB_EMG/` without Scoped Storage restrictions.
 
-### 10.13 `buildozer.spec`: landscape orientation
+### 10.15 `buildozer.spec`: landscape orientation
 
 ```ini
 orientation = landscape
@@ -370,11 +403,11 @@ orientation = landscape
 
 Forces landscape on Android to match the widescreen plot layout.
 
-### 10.14 `main.py`: runtime storage permission
+### 10.16 `main.py`: runtime storage permission
 
 `on_start()` schedules `_check_storage_permission()` 0.5 s after launch. This requests `WRITE_EXTERNAL_STORAGE` and `READ_EXTERNAL_STORAGE` at runtime (required on Android 9/10). If the user denies, a dialog explains how to grant it manually.
 
-### 10.15 `app/core/paths.py`: Android-aware path resolution
+### 10.17 `app/core/paths.py`: Android-aware path resolution
 
 Three-tier fallback for `get_recordings_dir()`:
 1. `jnius` → `Context.getExternalFilesDir()` (external app-private, no special permission needed after Android 11)
