@@ -164,8 +164,8 @@ class LongitudinalScreen(Screen):
         self._session_grid.clear_widgets()
         for s in reversed(self._sessions):  # newest first
             card = BoxLayout(
-                orientation='vertical', size_hint_y=None, height=150,
-                padding=8, spacing=14,
+                orientation='vertical', size_hint_y=None, height=180,
+                padding=8, spacing=10,
             )
             line1 = (
                 f"{s.get('date', '?')}  |  {s.get('muscle_group', '?')}  |  "
@@ -177,10 +177,13 @@ class LongitudinalScreen(Screen):
                 f"Contractions: {s.get('contraction_count', 0)}"
             )
             line3 = f"Subject: {s.get('subject_id', '--')}  |  Duration: {s.get('duration_sec', 0):.1f}s"
+            line4 = f"File: {s.get('recording_file', '--')}"
             card.add_widget(Label(text=line1, font_size=sp(14), size_hint_y=None, height=30,
                                   color=(0.9, 0.9, 0.9, 1), halign='left'))
             card.add_widget(Label(text=line2, font_size=sp(13), size_hint_y=None, height=30,
                                   color=(0.7, 0.85, 1.0, 1), halign='left'))
             card.add_widget(Label(text=line3, font_size=sp(12), size_hint_y=None, height=26,
                                   color=(0.6, 0.6, 0.6, 1), halign='left'))
+            card.add_widget(Label(text=line4, font_size=sp(11), size_hint_y=None, height=26,
+                                  color=(0.45, 0.45, 0.45, 1), halign='left'))
             self._session_grid.add_widget(card)

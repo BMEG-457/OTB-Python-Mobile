@@ -110,16 +110,13 @@ class SessionHistoryManager:
             rms_first = rms_second = 0.0
             fatigue_detected = False
 
-        # Contraction count (if calibration threshold available)
+        # Contraction count via TKEO burst detection (same method as analysis screen)
+        from app.processing.features import compute_burst_duration
+        timestamps = np.array([t for t, _ in recording_data])
         contraction_count = 0
-        if calibration_info and calibration_info.get('threshold_means') is not None:
-            thresh = calibration_info['threshold_means']
-            if best_ch < len(thresh):
-                th = thresh[best_ch]
-                # Count threshold crossings (rising edge)
-                above = (np.abs(best_signal) > th).astype(int)
-                crossings = np.diff(above)
-                contraction_count = int(np.sum(crossings == 1))
+        burst_result = compute_burst_duration(best_signal, timestamps, CFG.DEVICE_SAMPLE_RATE)
+        if burst_result is not None:
+            contraction_count = burst_result.num_bursts
 
         duration = recording_data[-1][0] if recording_data else 0.0
 
