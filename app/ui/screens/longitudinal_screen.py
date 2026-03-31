@@ -18,8 +18,8 @@ class LongitudinalScreen(Screen):
 
     Layout:
         Top bar    [0.08] — Back + title
-        Filter bar [0.07] — Subject and Muscle Group filters
-        Chart      [0.45] — TrendPlotWidget
+        Filter bar [0.12] — Subject, Muscle Group, and Exercise Type filters
+        Chart      [0.40] — TrendPlotWidget
         Metric sel [0.07] — Peak RMS / Mean MF / Contractions buttons
         Session list[0.33] — ScrollView with session cards
     """
@@ -51,29 +51,42 @@ class LongitudinalScreen(Screen):
         ))
         root.add_widget(top)
 
-        # Filter bar
-        filt = BoxLayout(orientation='horizontal', size_hint=(1, 0.07), padding=4, spacing=8)
-        filt.add_widget(Label(text='Subject:', size_hint=(0.12, 1), font_size=sp(14)))
+        # Filter bar (two rows)
+        filt = BoxLayout(orientation='vertical', size_hint=(1, 0.12), padding=4, spacing=4)
+
+        row1 = BoxLayout(orientation='horizontal', size_hint=(1, 0.5), spacing=8)
+        row1.add_widget(Label(text='Subject:', size_hint=(0.12, 1), font_size=sp(14)))
         self._spn_subject = Spinner(
-            text='All', values=['All'], size_hint=(0.28, 1), font_size=sp(14),
+            text='All', values=['All'], size_hint=(0.38, 1), font_size=sp(14),
         )
         self._spn_subject.bind(text=lambda *a: self._apply_filter())
-        filt.add_widget(self._spn_subject)
+        row1.add_widget(self._spn_subject)
 
-        filt.add_widget(Label(text='Muscle:', size_hint=(0.12, 1), font_size=sp(14)))
+        row1.add_widget(Label(text='Muscle:', size_hint=(0.12, 1), font_size=sp(14)))
         self._spn_muscle = Spinner(
-            text='All', values=['All'], size_hint=(0.28, 1), font_size=sp(14),
+            text='All', values=['All'], size_hint=(0.38, 1), font_size=sp(14),
         )
         self._spn_muscle.bind(text=lambda *a: self._apply_filter())
-        filt.add_widget(self._spn_muscle)
+        row1.add_widget(self._spn_muscle)
+        filt.add_widget(row1)
+
+        row2 = BoxLayout(orientation='horizontal', size_hint=(1, 0.5), spacing=8)
+        row2.add_widget(Label(text='Exercise:', size_hint=(0.12, 1), font_size=sp(14)))
+        self._spn_exercise = Spinner(
+            text='All', values=['All'], size_hint=(0.68, 1), font_size=sp(14),
+        )
+        self._spn_exercise.bind(text=lambda *a: self._apply_filter())
+        row2.add_widget(self._spn_exercise)
 
         btn_refresh = Button(text='Refresh', size_hint=(0.20, 1), font_size=sp(14))
         btn_refresh.bind(on_press=lambda inst: self._refresh())
-        filt.add_widget(btn_refresh)
+        row2.add_widget(btn_refresh)
+        filt.add_widget(row2)
+
         root.add_widget(filt)
 
         # Trend chart
-        self._chart = TrendPlotWidget(size_hint=(1, 0.45))
+        self._chart = TrendPlotWidget(size_hint=(1, 0.40))
         root.add_widget(self._chart)
 
         # Metric selector
@@ -109,8 +122,10 @@ class LongitudinalScreen(Screen):
         # Populate filter spinners
         subjects = sorted({s.get('subject_id', '') for s in all_sessions if s.get('subject_id')})
         muscles = sorted({s.get('muscle_group', '') for s in all_sessions if s.get('muscle_group')})
+        exercises = sorted({s.get('exercise_type', '') for s in all_sessions if s.get('exercise_type')})
         self._spn_subject.values = ['All'] + subjects
         self._spn_muscle.values = ['All'] + muscles
+        self._spn_exercise.values = ['All'] + exercises
 
         self._all_sessions = all_sessions
         self._apply_filter()
@@ -119,10 +134,13 @@ class LongitudinalScreen(Screen):
         sessions = self._all_sessions if hasattr(self, '_all_sessions') else []
         subj = self._spn_subject.text
         musc = self._spn_muscle.text
+        exer = self._spn_exercise.text
         if subj != 'All':
             sessions = [s for s in sessions if s.get('subject_id') == subj]
         if musc != 'All':
             sessions = [s for s in sessions if s.get('muscle_group') == musc]
+        if exer != 'All':
+            sessions = [s for s in sessions if s.get('exercise_type') == exer]
         self._sessions = sessions
         self._update_chart()
         self._update_session_list()
