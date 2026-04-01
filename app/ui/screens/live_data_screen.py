@@ -375,7 +375,7 @@ class LiveDataScreen(Screen):
         )
         self.bottom_label = Label(
             text='Press "Stream" to connect to the device.',
-            font_size=sp(14), color=(0.6, 0.6, 0.6, 1),
+            font_size=sp(10), color=(0.6, 0.6, 0.6, 1),
             size_hint=(1, 1), halign='left', valign='middle',
         )
         self.bottom_label.bind(size=self.bottom_label.setter('text_size'))
