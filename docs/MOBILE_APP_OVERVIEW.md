@@ -71,8 +71,8 @@ buildozer.spec                  Android build configuration
 ## Key Design Points
 
 - **No scipy at runtime.** Filter coefficients are pre-computed offline at 2000 Hz and stored in `config.json`. `iir_filter.py` provides pure-numpy replacements for `lfilter`, `filtfilt`, `find_peaks`, and `resample_signal`.
-- **Receiver thread runs once.** `streaming_controller.py` toggles a `running` flag to pause/resume. The thread is never restarted — only started once per app session.
-- **Pending-data pattern.** Data arrives at 16 Hz; UI renders at 30 fps. `_on_data()` writes to `_pending_data`; `_ui_tick()` reads and clears it. Last-packet-wins — no queue buildup.
+- **Receiver thread per session.** A new `DataReceiverThread` is created each time the user presses Stream. Pressing Stop calls `receiver_thread.stop()`, which sets `_stopping=True` and calls `socket.shutdown(SHUT_RDWR)` + `socket.close()` to terminate the thread cleanly on Android/Linux.
+- **Packet accumulation pattern.** Data arrives at 16 Hz; UI renders at 30 fps. `_on_data()` appends each `final`-stage packet to `_pending_packets` (a list). `_ui_tick()` atomically swaps the list with `[]` and concatenates all accumulated packets. All packets between ticks are rendered — no data is dropped.
 - **Kivy Clock for thread safety.** All widget updates from background threads go through `Clock.schedule_once(fn, 0)`.
 - **Configuration-driven.** All magic numbers live in `config.json`. Never hardcode a threshold or frequency directly in source.
 - **Adapter channel remapping.** `config.json ["adapter"]["type"]` selects the ribbon cable. `config.py` loads the built-in channel map preset and derives `DEAD_CHANNELS` — the frozenset of logical channel indices that are always zero for the given adapter. The receiver thread applies the map after cropping to 64 channels and re-zeros dead channels after the filter pipeline to prevent IIR transients.
