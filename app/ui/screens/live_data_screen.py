@@ -715,6 +715,9 @@ class LiveDataScreen(Screen):
         self._set_status('Stream stopped')
 
     def _on_receiver_error(self, message):
+        # Guard against stale Clock-scheduled callbacks arriving after intentional stop
+        if not self.streaming_controller or not self.streaming_controller.is_streaming:
+            return
         self._set_bottom(f'Receiver error: {message}')
         self._stop_stream()
 
