@@ -351,10 +351,6 @@ class LiveDataScreen(Screen):
             text='RMS: --', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
             size_hint=(0.20, 1),
         )
-        self._lbl_mf = Label(
-            text='MF: -- Hz', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
-            size_hint=(0.20, 1),
-        )
         self.contraction_label = Label(
             text='Contraction', font_size=sp(14), color=CFG.CONTRACTION_INACTIVE,
             size_hint=(0.20, 1),
@@ -364,7 +360,6 @@ class LiveDataScreen(Screen):
             size_hint=(0.20, 1),
         )
         self._metrics_bar.add_widget(self._lbl_rms)
-        self._metrics_bar.add_widget(self._lbl_mf)
         self._metrics_bar.add_widget(self.contraction_label)
         self._metrics_bar.add_widget(self._lbl_active_ch)
         root.add_widget(self._metrics_bar)
@@ -824,7 +819,6 @@ class LiveDataScreen(Screen):
         m = self._pending_metrics
         if m is not None:
             self._lbl_rms.text = f'RMS: {m["rms"]:.1f}'
-            self._lbl_mf.text = f'MF: {m["median_freq"]:.1f} Hz'
             self._lbl_active_ch.text = f'Ch: {self._get_active_channel_index() + 1}'
 
 
