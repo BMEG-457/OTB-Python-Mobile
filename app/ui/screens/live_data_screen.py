@@ -253,24 +253,6 @@ class LiveDataScreen(Screen):
         self.btn_record.disabled = True
         top_bar.add_widget(self.btn_record)
 
-        self.battery_label = Label(
-            text='Bat: --', color=(0.5, 0.5, 0.5, 1),
-            size_hint_x=None, width=dp(65), font_size=sp(12),
-        )
-        top_bar.add_widget(self.battery_label)
-
-        self.latency_label = Label(
-            text='Lat: --', color=(0.5, 0.5, 0.5, 1),
-            size_hint_x=None, width=dp(55), font_size=sp(12),
-        )
-        top_bar.add_widget(self.latency_label)
-
-        self.status_label = Label(
-            text='Not connected', color=(0.7, 0.7, 0.7, 1),
-            size_hint_x=None, width=dp(85), font_size=sp(12),
-        )
-        top_bar.add_widget(self.status_label)
-
         root.add_widget(top_bar)
 
         # ---- Disconnect warning banner ----
@@ -369,10 +351,6 @@ class LiveDataScreen(Screen):
             text='RMS: --', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
             size_hint=(0.20, 1),
         )
-        self._lbl_mf = Label(
-            text='MF: -- Hz', font_size=sp(14), color=(0.8, 0.8, 0.8, 1),
-            size_hint=(0.20, 1),
-        )
         self.contraction_label = Label(
             text='Contraction', font_size=sp(14), color=CFG.CONTRACTION_INACTIVE,
             size_hint=(0.20, 1),
@@ -382,18 +360,37 @@ class LiveDataScreen(Screen):
             size_hint=(0.20, 1),
         )
         self._metrics_bar.add_widget(self._lbl_rms)
-        self._metrics_bar.add_widget(self._lbl_mf)
         self._metrics_bar.add_widget(self.contraction_label)
         self._metrics_bar.add_widget(self._lbl_active_ch)
         root.add_widget(self._metrics_bar)
 
         # ---- Bottom status bar ----
+        bottom_bar = BoxLayout(
+            orientation='horizontal', size_hint=(1, 0.05), padding=[4, 0], spacing=8,
+        )
         self.bottom_label = Label(
             text='Press "Stream" to connect to the device.',
-            font_size=sp(14), color=(0.6, 0.6, 0.6, 1),
-            size_hint=(1, 0.05),
+            font_size=sp(10), color=(0.6, 0.6, 0.6, 1),
+            size_hint=(1, 1), halign='left', valign='middle',
         )
-        root.add_widget(self.bottom_label)
+        self.bottom_label.bind(size=self.bottom_label.setter('text_size'))
+        self.status_label = Label(
+            text='Not connected', color=(0.7, 0.7, 0.7, 1),
+            size_hint_x=None, width=dp(95), font_size=sp(12),
+        )
+        self.latency_label = Label(
+            text='Lat: --', color=(0.5, 0.5, 0.5, 1),
+            size_hint_x=None, width=dp(55), font_size=sp(12),
+        )
+        self.battery_label = Label(
+            text='Bat: --', color=(0.5, 0.5, 0.5, 1),
+            size_hint_x=None, width=dp(65), font_size=sp(12),
+        )
+        bottom_bar.add_widget(self.bottom_label)
+        bottom_bar.add_widget(self.status_label)
+        bottom_bar.add_widget(self.latency_label)
+        bottom_bar.add_widget(self.battery_label)
+        root.add_widget(bottom_bar)
 
         self.add_widget(root)
 
@@ -718,6 +715,9 @@ class LiveDataScreen(Screen):
         self._set_status('Stream stopped')
 
     def _on_receiver_error(self, message):
+        # Guard against stale Clock-scheduled callbacks arriving after intentional stop
+        if not self.streaming_controller or not self.streaming_controller.is_streaming:
+            return
         self._set_bottom(f'Receiver error: {message}')
         self._stop_stream()
 
@@ -822,7 +822,6 @@ class LiveDataScreen(Screen):
         m = self._pending_metrics
         if m is not None:
             self._lbl_rms.text = f'RMS: {m["rms"]:.1f}'
-            self._lbl_mf.text = f'MF: {m["median_freq"]:.1f} Hz'
             self._lbl_active_ch.text = f'Ch: {self._get_active_channel_index() + 1}'
 
 

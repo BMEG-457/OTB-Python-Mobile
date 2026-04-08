@@ -18,8 +18,8 @@ class LongitudinalScreen(Screen):
 
     Layout:
         Top bar    [0.08] — Back + title
-        Filter bar [0.12] — Subject, Muscle Group, and Exercise Type filters
-        Chart      [0.40] — TrendPlotWidget
+        Filter bar [0.07] — Subject, Muscle Group, and Exercise Type filters
+        Chart      [0.45] — TrendPlotWidget
         Metric sel [0.07] — Peak RMS / Mean MF / Contractions buttons
         Session list[0.33] — ScrollView with session cards
     """
@@ -51,34 +51,30 @@ class LongitudinalScreen(Screen):
         ))
         root.add_widget(top)
 
-        # Filter bar (two rows)
-        filt = BoxLayout(orientation='vertical', size_hint=(1, 0.12), padding=4, spacing=4)
-
-        row1 = BoxLayout(orientation='horizontal', size_hint=(1, 0.5), spacing=8)
-        row1.add_widget(Label(text='Subject:', size_hint=(0.12, 1), font_size=sp(14)))
+        # Filter bar
+        filt = BoxLayout(orientation='horizontal', size_hint=(1, 0.07), padding=4, spacing=8)
+        filt.add_widget(Label(text='Subject:', size_hint=(0.10, 1), font_size=sp(14)))
         self._spn_subject = Spinner(
-            text='All', values=['All'], size_hint=(0.38, 1), font_size=sp(14),
+            text='All', values=['All'], size_hint=(0.18, 1), font_size=sp(14),
         )
         self._spn_subject.bind(text=lambda *a: self._apply_filter())
         row1.add_widget(self._spn_subject)
 
-        row1.add_widget(Label(text='Muscle:', size_hint=(0.12, 1), font_size=sp(14)))
+        filt.add_widget(Label(text='Muscle:', size_hint=(0.10, 1), font_size=sp(14)))
         self._spn_muscle = Spinner(
-            text='All', values=['All'], size_hint=(0.38, 1), font_size=sp(14),
+            text='All', values=['All'], size_hint=(0.20, 1), font_size=sp(14),
         )
         self._spn_muscle.bind(text=lambda *a: self._apply_filter())
-        row1.add_widget(self._spn_muscle)
-        filt.add_widget(row1)
+        filt.add_widget(self._spn_muscle)
 
-        row2 = BoxLayout(orientation='horizontal', size_hint=(1, 0.5), spacing=8)
-        row2.add_widget(Label(text='Exercise:', size_hint=(0.12, 1), font_size=sp(14)))
+        filt.add_widget(Label(text='Exercise:', size_hint=(0.10, 1), font_size=sp(14)))
         self._spn_exercise = Spinner(
-            text='All', values=['All'], size_hint=(0.68, 1), font_size=sp(14),
+            text='All', values=['All'], size_hint=(0.20, 1), font_size=sp(14),
         )
         self._spn_exercise.bind(text=lambda *a: self._apply_filter())
-        row2.add_widget(self._spn_exercise)
+        filt.add_widget(self._spn_exercise)
 
-        btn_refresh = Button(text='Refresh', size_hint=(0.20, 1), font_size=sp(14))
+        btn_refresh = Button(text='Refresh', size_hint=(0.12, 1), font_size=sp(14))
         btn_refresh.bind(on_press=lambda inst: self._refresh())
         row2.add_widget(btn_refresh)
         filt.add_widget(row2)
@@ -123,8 +119,10 @@ class LongitudinalScreen(Screen):
         subjects = sorted({s.get('subject_id', '') for s in all_sessions if s.get('subject_id')})
         muscles = sorted({s.get('muscle_group', '') for s in all_sessions if s.get('muscle_group')})
         exercises = sorted({s.get('exercise_type', '') for s in all_sessions if s.get('exercise_type')})
+        exercises = sorted({s.get('exercise_type', '') for s in all_sessions if s.get('exercise_type')})
         self._spn_subject.values = ['All'] + subjects
         self._spn_muscle.values = ['All'] + muscles
+        self._spn_exercise.values = ['All'] + exercises
         self._spn_exercise.values = ['All'] + exercises
 
         self._all_sessions = all_sessions
@@ -135,10 +133,13 @@ class LongitudinalScreen(Screen):
         subj = self._spn_subject.text
         musc = self._spn_muscle.text
         exer = self._spn_exercise.text
+        exer = self._spn_exercise.text
         if subj != 'All':
             sessions = [s for s in sessions if s.get('subject_id') == subj]
         if musc != 'All':
             sessions = [s for s in sessions if s.get('muscle_group') == musc]
+        if exer != 'All':
+            sessions = [s for s in sessions if s.get('exercise_type') == exer]
         if exer != 'All':
             sessions = [s for s in sessions if s.get('exercise_type') == exer]
         self._sessions = sessions
@@ -163,8 +164,8 @@ class LongitudinalScreen(Screen):
         self._session_grid.clear_widgets()
         for s in reversed(self._sessions):  # newest first
             card = BoxLayout(
-                orientation='vertical', size_hint_y=None, height=150,
-                padding=8, spacing=14,
+                orientation='vertical', size_hint_y=None, height=180,
+                padding=8, spacing=10,
             )
             line1 = (
                 f"{s.get('date', '?')}  |  {s.get('muscle_group', '?')}  |  "
@@ -176,10 +177,13 @@ class LongitudinalScreen(Screen):
                 f"Contractions: {s.get('contraction_count', 0)}"
             )
             line3 = f"Subject: {s.get('subject_id', '--')}  |  Duration: {s.get('duration_sec', 0):.1f}s"
+            line4 = f"File: {s.get('recording_file', '--')}"
             card.add_widget(Label(text=line1, font_size=sp(14), size_hint_y=None, height=30,
                                   color=(0.9, 0.9, 0.9, 1), halign='left'))
             card.add_widget(Label(text=line2, font_size=sp(13), size_hint_y=None, height=30,
                                   color=(0.7, 0.85, 1.0, 1), halign='left'))
             card.add_widget(Label(text=line3, font_size=sp(12), size_hint_y=None, height=26,
                                   color=(0.6, 0.6, 0.6, 1), halign='left'))
+            card.add_widget(Label(text=line4, font_size=sp(11), size_hint_y=None, height=26,
+                                  color=(0.45, 0.45, 0.45, 1), halign='left'))
             self._session_grid.add_widget(card)

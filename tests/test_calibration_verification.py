@@ -1,4 +1,4 @@
-"""Tests for the calibration verification phase logic."""
+"""Tests for the calibration verification logic (run on MVC data)."""
 
 import unittest
 import numpy as np
@@ -8,9 +8,6 @@ from app.core import config as CFG
 
 class TestCalibrationVerifyConfig(unittest.TestCase):
     """Verify calibration verification config values are loaded."""
-
-    def test_verify_duration(self):
-        self.assertEqual(CFG.CALIBRATION_VERIFY_DURATION, 3.0)
 
     def test_verify_active_fraction(self):
         self.assertEqual(CFG.CALIBRATION_VERIFY_ACTIVE_FRAC, 0.25)
@@ -72,23 +69,6 @@ class TestVerificationConcentration(unittest.TestCase):
         rms[:32] = 50.0
         concentration = self._compute_concentration(rms)
         self.assertAlmostEqual(concentration, 0.5)
-
-
-class TestVerifyPhaseRouting(unittest.TestCase):
-    """Verify sample routing for the verify phase."""
-
-    def test_collect_sample_routes_to_verify(self):
-        """Data should be routed to verify list when phase='verify'."""
-        verify_samples = []
-        phase = 'verify'
-        data = np.random.randn(72, 10).astype(np.float32)
-
-        # Replicate _collect_sample dispatch
-        if phase == 'verify':
-            verify_samples.append(data.copy())
-
-        self.assertEqual(len(verify_samples), 1)
-        np.testing.assert_array_equal(verify_samples[0], data)
 
 
 if __name__ == '__main__':

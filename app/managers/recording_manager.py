@@ -196,6 +196,7 @@ class RecordingManager:
                     summary = SessionHistoryManager.compute_session_summary(
                         self.recording_data, metadata, cal_info
                     )
+                    summary['recording_file'] = os.path.basename(filename)
                     self._session_history.append_session(summary)
                 except Exception as e:
                     print(f"[RECORDING] Session summary error: {e}")

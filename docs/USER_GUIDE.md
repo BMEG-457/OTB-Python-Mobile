@@ -22,7 +22,7 @@ EMG (electromyography) measures the electrical activity produced by skeletal mus
 - Ribbon cable adapter: **ad1x64sp** (64-ch, 8×8 grid, all channels active) or **ad2x32sp** (dual 32-ch, 8×8 grid, 48 of 64 channels active)
 - Electrode array(s) matched to the adapter
 - Android phone (Android 5.0 / API 21 or newer; landscape orientation)
-- WiFi network broadcast by the device (SSID typically "Sessantaquattro+")
+- WiFi network broadcast by the device (SSID typically "SP00##")
 
 ---
 
@@ -52,7 +52,7 @@ The **Selection Screen** appears on launch. Tap one of the three buttons:
 | **Data Analysis** | Offline analysis of saved CSV files |
 | **Session History** | Longitudinal session tracking and trend visualization |
 
-**Basic vs. Advanced mode:** Basic mode hides the channel selector, time window, and view mode controls — ideal for clinical workflows where only the auto-MAV envelope is needed. Advanced mode exposes all controls (view modes, channel selection, time window cycling).
+**Basic vs. Advanced mode:** Basic mode hides the channel selector, time window, and view mode controls — ideal for clinical workflows where only the Auto MAV activation envelope is needed. Advanced mode exposes all controls (view modes, channel selection, time window cycling).
 
 Tap **Back** on any screen to return to the selection screen.
 
@@ -106,7 +106,7 @@ In **Advanced mode**, tap **View** in the tab bar to cycle through display modes
 
 | Mode | Tracks | Description |
 |---|---|---|
-| Auto MAV | 1 | Automatic channel selection — displays MAV envelope of the highest-activity channel |
+| Auto MAV | 1 | Automatic channel selection — displays a 10 Hz lowpass-filtered rectified signal (smooth activation envelope) of the highest-activity channel. Channel is re-selected each tick before calibration; locked after calibration. |
 | Single Ch1 | 1 | Single channel rolling waveform. Enter a channel number (1–64) in the Ch: field. |
 | Rows (8) | 8 | Per-row mean across all 8 columns of the electrode grid |
 | Cols (8) | 8 | Per-column mean across all 8 rows |
@@ -231,7 +231,7 @@ Tap **Export** to save all analysis results (TKEO, burst, fatigue, bilateral, ce
 | Verification phase shows WARNING | Diffuse activation during dorsiflexion | Reposition electrode array over muscle belly; re-run calibration |
 | Crosstalk check shows WARNING | TA array picking up gastrocnemius | Reposition array; ensure it is centered over TA, not overlapping adjacent muscles |
 | Recordings not visible in file manager | Storage permission denied | Settings > Apps > OTB EMG App > Permissions > Storage > Allow, then restart app |
-| "Max samples reached" during recording | Recording exceeded 1,000,000 samples | File is saved; start a new recording |
+| "Recording stopped: max samples reached." during recording | Recording exceeded 1,000,000 samples | File is saved; start a new recording |
 | Autosave recovery message on launch | Previous session crashed during recording | The recovered file is saved; check recordings folder |
 | Analysis returns no result | Recording too short or corrupted | Recording must have at least 30 valid samples per channel |
 | Bilateral Symmetry file browser doesn't open | File 1 not loaded | Load File 1 first, then press Bilateral Symmetry |

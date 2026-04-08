@@ -124,7 +124,8 @@ The `adapter` section of `config.json` controls ribbon cable channel remapping:
 
 ```json
 "adapter": {
-  "type": "ad2x32sp",
+  "type": "ad1x64sp",
+  "heatmap_mode": "demo",
   "channel_map": null
 }
 ```
@@ -202,7 +203,11 @@ Packet rate = 2000 Hz / 125 samples = 16 packets/second
 Samples are big-endian signed 16-bit integers (ADC output). `DataReceiverThread` unpacks and reshapes each packet to `(72, 125)` using:
 
 ```python
-raw = np.frombuffer(buf, dtype='>i2').reshape(72, 125).astype(np.float32)
+all_ch = (np.frombuffer(pkt_bytes, dtype='>i2')
+          .astype(np.float32)
+          .reshape(samples_per_pkt, nch)   # (125, 72)
+          .T)                              # → (72, 125): (channels, samples)
+raw = all_ch[:CFG.HDSEMG_CHANNELS]        # crop to 64 HD-EMG channels
 ```
 
 ### Battery query
@@ -234,13 +239,13 @@ Sessantaquattro+ (TCP)
       on_stage callbacks:
         → recording_manager.on_data_for_recording(stage, data)
         → calibration_extra_callback(stage, data)   [during calibration only]
-        → live_data_screen._on_data(stage, data)    [stores to _pending_data on 'final']
+        → live_data_screen._on_data(stage, data)    [appends to _pending_packets on 'final']
 
       socket.timeout (5 s) during pause: continue loop — keeps thread alive
 
 Kivy Clock.schedule_interval(_ui_tick, 1/30)   [30 fps]
   → LiveDataScreen._ui_tick(dt)
-      reads self._pending_data, clears it
+      swaps self._pending_packets with [], concatenates all accumulated packets
       → _render_plot_panel(data)   or   _render_heatmap_panel(data)
 ```
 
@@ -260,7 +265,7 @@ Each pipeline stage receives and returns `np.ndarray` of shape `(n_channels, n_s
 
 ### Pending-data pattern
 
-`_on_data()` runs on the receiver thread. Writing to `self._pending_data` (assignment is atomic in CPython) is the only cross-thread operation. `_ui_tick()` reads and nulls it on the Kivy main thread. This decouples 16 Hz data arrival from 30 fps rendering without locks or queues.
+`_on_data()` runs on the receiver thread and appends each `final`-stage packet to `self._pending_packets` (a Python list). `_ui_tick()` runs on the Kivy main thread: it atomically replaces the list with a new empty list, then concatenates all accumulated packets along the sample axis. This decouples 16 Hz data arrival from 30 fps rendering: multiple packets accumulate between ticks and are concatenated into one array for rendering, without locks or queues. The list swap (`self._pending_packets = []`) is atomic in CPython.
 
 ---
 
@@ -271,7 +276,7 @@ Each pipeline stage receives and returns `np.ndarray` of shape `(n_channels, n_s
 | Thread | What it does |
 |---|---|
 | Main (Kivy) | UI construction, `_ui_tick`, all widget updates, safety alert rendering |
-| Receiver (`DataReceiverThread`) | `socket.recv()` loop, pipeline dispatch, writes `_pending_data`, disconnect detection — defined in `app/data/data_receiver.py` |
+| Receiver (`DataReceiverThread`) | `socket.recv()` loop, pipeline dispatch, appends to `_pending_packets`, disconnect detection — defined in `app/data/data_receiver.py` |
 | Connection daemon | `device.start_server()` + `send_command()`; marshals result back via `Clock.schedule_once` |
 | Battery daemon | `device.get_battery_level()` HTTP query |
 | Save daemon | `recording_manager.save_recording_to_csv()` CSV write + metadata sidecar + session history |
@@ -282,7 +287,12 @@ All background-to-UI results use:
 Clock.schedule_once(lambda dt: update_ui(result), 0)
 ```
 
-The receiver thread is **never restarted**. `StreamingController` sets `receiver_thread.running = False` to pause data feeding (the thread blocks in `socket.recv()` but drops packets when `running` is False). A new `DataReceiverThread` is created each time the user presses Stream, but `threading.Thread` can only be started once — the old thread must have exited before a new one is created. In practice, once the socket closes the recv loop exits.
+A new `DataReceiverThread` is created each time the user presses Stream (in `_on_connected`). Pressing Stream again to stop calls `_stop_stream()`, which:
+1. Calls `StreamingController.stop_streaming()` → sets `receiver_thread.running = False` and cancels the Kivy clock.
+2. Calls `receiver_thread.stop()` → sets `_stopping = True`, calls `socket.shutdown(SHUT_RDWR)` (required on Android/Linux to immediately interrupt a blocking `recv()`), then `socket.close()`. The thread exits its recv loop cleanly without triggering `on_error`.
+3. Calls `device.stop_server()` → closes and nulls the server and client sockets.
+
+`threading.Thread` can only be started once; the terminated thread is discarded and a new instance is created on the next Stream press.
 
 ---
 
@@ -296,7 +306,7 @@ All coefficients are pre-computed offline at 2000 Hz using `scripts/compute_filt
 |---|---|---|
 | `BANDPASS_4_B/A` | Butterworth order 4, 20–450 Hz bandpass | Live pipeline; all post-session analyses |
 | `BANDPASS_1_B/A` | Butterworth order 1, 20–450 Hz bandpass | Short-data fallback in `butter_bandpass` |
-| `LOWPASS_10_4_B/A` | Butterworth order 4, 10 Hz lowpass | TKEO envelope smoothing |
+| `LOWPASS_10_4_B/A` | Butterworth order 4, 10 Hz lowpass | TKEO envelope smoothing (post-session, via `filtfilt`); Auto MAV live display envelope (`_envelope_filter` in `LiveDataScreen`, via `StatefulIIRFilter`) |
 | `NOTCH_60_B/A` | Butterworth order 2 notch, 60 Hz, Q=30 | Live pipeline power-line removal |
 
 To regenerate after changing sample rate or cutoffs:
@@ -350,7 +360,7 @@ The `CalibrationPopup` is a Kivy `Popup` that runs a three-phase protocol driven
 
 1. **Rest phase** (3.0 s) — registers `_calibration_extra_callback` via `on_sample_connect`; collects raw stage packets into `_rest_samples`.
 2. **MVC phase** (3.0 s) — same callback, collects into `_mvc_samples`.
-3. **Verification phase** (3.0 s) — collects into `_verify_samples`. Subject performs dorsiflexion. The popup evaluates spatial concentration of activation.
+3. **Verification phase** (3.0 s) — collects into `_verify_samples`; evaluates spatial concentration of activation via `compute_concentration()`. Result is PASS (green) if activation is spatially concentrated, WARNING (orange) if diffuse.
 4. **Computation:**
    ```
    rest_data  = concatenated rest packets (n_channels, n_rest_samples)
@@ -359,14 +369,7 @@ The `CalibrationPopup` is a Kivy `Popup` that runs a three-phase protocol driven
    mvc_rms      = sqrt(mean(mvc_data²))            shape (n_channels,)
    threshold    = baseline_rms + 0.3 × (mvc_rms − baseline_rms)
    ```
-5. **Verification evaluation:**
-   ```
-   verify_rms = sqrt(mean(verify_data²))           shape (n_channels,)
-   concentration = sum(top_quarter_channels_rms) / sum(all_channels_rms)
-   PASS if concentration > CALIBRATION_VERIFY_ACTIVE_FRAC (0.25)
-   ```
-   `compute_concentration(rms_per_ch)` is a static method that returns a float in [0, 1] indicating spatial focus.
-6. Emits `on_complete(baseline_rms, threshold, mvc_rms)` to `LiveDataScreen`. Verification result (PASS/WARNING) is displayed in the popup.
+5. Emits `on_complete(baseline_rms, threshold, mvc_rms)` to `LiveDataScreen`.
 
 `LiveDataScreen._on_data()` feeds raw packets to the calibration callback directly on the receiver thread (no Clock call). The popup accumulates lists and concatenates at the end to avoid repeated array allocation.
 

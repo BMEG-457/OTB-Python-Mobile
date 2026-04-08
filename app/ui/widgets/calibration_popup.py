@@ -11,12 +11,11 @@ from app.core import config as CFG
 
 
 class CalibrationPopup(Popup):
-    """Two-phase calibration popup: rest then MVC.
+    """Two-phase calibration popup: rest, then MVC.
 
     Phase 1 (Rest): Collects baseline EMG at rest.
-    Phase 2 (MVC): Collects maximum voluntary contraction. Spatial concentration
-        of the MVC signal is checked immediately after collection to confirm
-        electrode placement — no separate verification contraction is required.
+    Phase 2 (MVC): Collects maximum voluntary contraction. The MVC data is
+        also used for activation pattern verification — no separate phase needed.
 
     Calls on_complete with (baseline_rms, threshold, mvc_rms) as numpy arrays
     of shape (n_channels,) when both phases are done.
@@ -40,6 +39,7 @@ class CalibrationPopup(Popup):
 
         self._rest_samples = []
         self._mvc_samples = []
+        self._current_phase = None  # 'rest' | 'mvc'
         self._current_phase = None  # 'rest' | 'mvc'
 
         # Build content
@@ -67,6 +67,7 @@ class CalibrationPopup(Popup):
         self._current_phase = 'rest'
         self._rest_samples = []
         self.status_label.text = 'Phase 1 of 2: Rest'
+        self.status_label.text = 'Phase 1 of 2: Rest'
         self.instruction_label.text = 'Relax your muscle completely.'
         self.progress.value = 0
         self.on_sample_connect(self._collect_sample)
@@ -76,17 +77,19 @@ class CalibrationPopup(Popup):
         self._current_phase = 'mvc'
         self._mvc_samples = []
         self.status_label.text = 'Phase 2 of 2: MVC'
+        self.status_label.text = 'Phase 2 of 2: MVC'
         self.instruction_label.text = 'Contract as hard as you can!'
         self.progress.value = 0
-        self._schedule_progress(CFG.CALIBRATION_MVC_DURATION, self._evaluate_mvc)
+        self._schedule_progress(CFG.CALIBRATION_MVC_DURATION, self._evaluate_and_finish)
 
-    def _evaluate_mvc(self, dt=None):
-        """Check whether MVC activation is spatially concentrated."""
+    def _evaluate_and_finish(self, dt=None):
+        """Verify activation pattern using MVC data, then finish."""
         if not self._mvc_samples:
-            self.instruction_label.text = 'No data received during MVC.'
+            self.instruction_label.text = 'No MVC data received.'
             Clock.schedule_once(lambda dt: self._finish(), CFG.CALIBRATION_DISMISS_DELAY)
             return
 
+        all_data = np.concatenate(self._mvc_samples, axis=1)
         all_data = np.concatenate(self._mvc_samples, axis=1)
         hd_channels = min(all_data.shape[0], CFG.HDSEMG_CHANNELS)
         hd_data = all_data[:hd_channels]
@@ -96,9 +99,11 @@ class CalibrationPopup(Popup):
 
         if concentration > CFG.CALIBRATION_VERIFY_ACTIVE_FRAC:
             self.status_label.text = 'Calibration: PASS'
+            self.status_label.text = 'Calibration: PASS'
             self.status_label.color = (0.2, 0.9, 0.2, 1)
             self.instruction_label.text = 'Activation pattern looks good!'
         else:
+            self.status_label.text = 'Calibration: WARNING'
             self.status_label.text = 'Calibration: WARNING'
             self.status_label.color = (1.0, 0.6, 0.1, 1)
             self.instruction_label.text = 'Diffuse activation — check electrode placement'

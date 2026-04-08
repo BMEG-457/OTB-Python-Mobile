@@ -43,6 +43,7 @@ class DataReceiverThread(threading.Thread):
         self.on_error      = on_error
         self.on_status     = on_status
         self.running       = False  # set True by StreamingController.start_streaming()
+        self._stopping     = False  # set True before intentional socket close
 
         self._packet_count = 0
         self._last_time    = time.time()
@@ -82,8 +83,11 @@ class DataReceiverThread(threading.Thread):
                 chunk = self.client_socket.recv(expected_bytes * 2)
 
                 if not chunk:
-                    print("[RECEIVER] Socket closed by remote end")
-                    self.on_error("Connection closed by device")
+                    if self._stopping:
+                        print("[RECEIVER] Socket shutdown — exiting cleanly")
+                    else:
+                        print("[RECEIVER] Socket closed by remote end")
+                        self.on_error("Connection closed by device")
                     break
 
                 buf += chunk
@@ -154,15 +158,29 @@ class DataReceiverThread(threading.Thread):
                 continue
 
             except Exception as e:
-                print(f"[RECEIVER] Error: {type(e).__name__}: {e}")
-                self.on_error(f"Receiver error: {e}")
+                if self._stopping:
+                    print(f"[RECEIVER] Socket closed during intentional stop — exiting cleanly")
+                else:
+                    print(f"[RECEIVER] Error: {type(e).__name__}: {e}")
+                    self.on_error(f"Receiver error: {e}")
                 break
 
         print(f"[RECEIVER] Thread exiting — {self._packet_count} packets received")
 
     def stop(self):
-        """Terminate the thread by closing the socket (forces recv to return)."""
+        """Terminate the thread by closing the socket (forces recv to return).
+
+        shutdown(SHUT_RDWR) is called first because on Linux/Android, close()
+        alone does not reliably interrupt a blocking recv() in another thread.
+        shutdown() sends a FIN/RST which causes recv() to return b'' immediately,
+        and close() then releases the file descriptor.
+        """
         self.running = False
+        self._stopping = True
+        try:
+            self.client_socket.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
         try:
             self.client_socket.close()
         except Exception:
