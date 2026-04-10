@@ -520,9 +520,28 @@ class DataAnalysisScreen(Screen):
         if ch_idx is None:
             self._set_results(f'Invalid channel number. Enter 1–{self._data1.shape[0]}.')
             return
-        ch_idx_2 = self._selected_channel(self._data2)
-        if ch_idx_2 is None:
-            self._set_results(f'Channel {ch_idx + 1} out of range for File 2 ({self._data2.shape[0]} channels).')
+
+        # For HD-EMG (64-channel, 8x8 grid) data, compare against the positional
+        # mirror across the vertical axis so that anatomically symmetric muscles are
+        # paired correctly (e.g. ch 8 on the left leg → ch 1 on the right leg).
+        n_ch_1 = self._data1.shape[0]
+        n_ch_2 = self._data2.shape[0]
+        hd_channels = CFG.HDSEMG_CHANNELS   # 64
+        hd_cols     = CFG.HDSEMG_GRID_COLS  # 8
+        if n_ch_1 == hd_channels and n_ch_2 == hd_channels:
+            # Grid is column-major, bottom-to-top: ch1 is bottom-left, ch8 is
+            # top-left, ch9 is bottom of next column, ch57 is bottom-right.
+            col = ch_idx // hd_cols   # 0 = leftmost column
+            row = ch_idx % hd_cols    # 0 = bottom row
+            mirror_col = (hd_cols - 1) - col
+            ch_idx_2 = mirror_col * hd_cols + row
+            mirror_note = f' (mirror ch {ch_idx_2 + 1} in File 2)'
+        else:
+            ch_idx_2 = ch_idx
+            mirror_note = ''
+
+        if ch_idx_2 >= n_ch_2:
+            self._set_results(f'Mirror channel {ch_idx_2 + 1} out of range for File 2 ({n_ch_2} channels).')
             return
         ch_num = ch_idx + 1
         self._set_results('Running bilateral symmetry analysis...')
@@ -545,7 +564,7 @@ class DataAnalysisScreen(Screen):
                     },
                 }
                 text = (
-                    f'Bilateral Symmetry Index — Channel {ch_num}\n'
+                    f'Bilateral Symmetry Index — Ch {ch_num} (File 1){mirror_note}\n'
                     f'  Mean SI: {result.mean_si:.4f}  '
                     f'(0 = symmetric, +1 = file1 dominant, -1 = file2 dominant)\n'
                     f'  Std SI: {result.std_si:.4f}\n'
