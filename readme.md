@@ -32,7 +32,7 @@ cd C:\platform-tools
 .\adb install -r "path\to\otbemgapp-0.1-arm64-v8a_armeabi-v7a-debug.apk"
 ```
 
-A pre-built debug APK is in `bin/`.
+Install the .apk file from the "releases" tab on github
 
 ### Build from source (WSL2)
 
