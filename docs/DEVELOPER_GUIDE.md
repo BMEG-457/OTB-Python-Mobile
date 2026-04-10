@@ -356,12 +356,11 @@ Call `set_baseline(rms)` after calibration. `update(samples)` returns a metrics 
 
 ## 8. Calibration (`calibration_popup.py`)
 
-The `CalibrationPopup` is a Kivy `Popup` that runs a three-phase protocol driven by `Clock.schedule_interval`:
+The `CalibrationPopup` is a Kivy `Popup` that runs a two-phase protocol driven by `Clock.schedule_interval`:
 
-1. **Rest phase** (3.0 s) — registers `_calibration_extra_callback` via `on_sample_connect`; collects raw stage packets into `_rest_samples`.
-2. **MVC phase** (3.0 s) — same callback, collects into `_mvc_samples`.
-3. **Verification phase** (3.0 s) — collects into `_verify_samples`; evaluates spatial concentration of activation via `compute_concentration()`. Result is PASS (green) if activation is spatially concentrated, WARNING (orange) if diffuse.
-4. **Computation:**
+1. **Rest phase** (3.0 s) — registers `_collect_sample` via `on_sample_connect`; collects raw stage packets into `_rest_samples`.
+2. **MVC phase** (3.0 s) — same callback, collects into `_mvc_samples`. After collection, `_evaluate_and_finish` evaluates spatial concentration of activation via `compute_concentration()` on the MVC data. Result is PASS (green) if activation is spatially concentrated, WARNING (orange) if diffuse.
+3. **Computation:**
    ```
    rest_data  = concatenated rest packets (n_channels, n_rest_samples)
    mvc_data   = concatenated mvc packets  (n_channels, n_mvc_samples)
@@ -369,7 +368,7 @@ The `CalibrationPopup` is a Kivy `Popup` that runs a three-phase protocol driven
    mvc_rms      = sqrt(mean(mvc_data²))            shape (n_channels,)
    threshold    = baseline_rms + 0.3 × (mvc_rms − baseline_rms)
    ```
-5. Emits `on_complete(baseline_rms, threshold, mvc_rms)` to `LiveDataScreen`.
+4. Emits `on_complete(baseline_rms, threshold, mvc_rms)` to `LiveDataScreen`.
 
 `LiveDataScreen._on_data()` feeds raw packets to the calibration callback directly on the receiver thread (no Clock call). The popup accumulates lists and concatenates at the end to avoid repeated array allocation.
 
