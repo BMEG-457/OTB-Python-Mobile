@@ -58,7 +58,7 @@ class LongitudinalScreen(Screen):
             text='All', values=['All'], size_hint=(0.18, 1), font_size=sp(14),
         )
         self._spn_subject.bind(text=lambda *a: self._apply_filter())
-        row1.add_widget(self._spn_subject)
+        filt.add_widget(self._spn_subject)
 
         filt.add_widget(Label(text='Muscle:', size_hint=(0.10, 1), font_size=sp(14)))
         self._spn_muscle = Spinner(
@@ -76,8 +76,7 @@ class LongitudinalScreen(Screen):
 
         btn_refresh = Button(text='Refresh', size_hint=(0.12, 1), font_size=sp(14))
         btn_refresh.bind(on_press=lambda inst: self._refresh())
-        row2.add_widget(btn_refresh)
-        filt.add_widget(row2)
+        filt.add_widget(btn_refresh)
 
         root.add_widget(filt)
 
@@ -119,10 +118,8 @@ class LongitudinalScreen(Screen):
         subjects = sorted({s.get('subject_id', '') for s in all_sessions if s.get('subject_id')})
         muscles = sorted({s.get('muscle_group', '') for s in all_sessions if s.get('muscle_group')})
         exercises = sorted({s.get('exercise_type', '') for s in all_sessions if s.get('exercise_type')})
-        exercises = sorted({s.get('exercise_type', '') for s in all_sessions if s.get('exercise_type')})
         self._spn_subject.values = ['All'] + subjects
         self._spn_muscle.values = ['All'] + muscles
-        self._spn_exercise.values = ['All'] + exercises
         self._spn_exercise.values = ['All'] + exercises
 
         self._all_sessions = all_sessions
@@ -133,13 +130,10 @@ class LongitudinalScreen(Screen):
         subj = self._spn_subject.text
         musc = self._spn_muscle.text
         exer = self._spn_exercise.text
-        exer = self._spn_exercise.text
         if subj != 'All':
             sessions = [s for s in sessions if s.get('subject_id') == subj]
         if musc != 'All':
             sessions = [s for s in sessions if s.get('muscle_group') == musc]
-        if exer != 'All':
-            sessions = [s for s in sessions if s.get('exercise_type') == exer]
         if exer != 'All':
             sessions = [s for s in sessions if s.get('exercise_type') == exer]
         self._sessions = sessions

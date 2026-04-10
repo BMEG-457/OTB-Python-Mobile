@@ -40,7 +40,6 @@ class CalibrationPopup(Popup):
         self._rest_samples = []
         self._mvc_samples = []
         self._current_phase = None  # 'rest' | 'mvc'
-        self._current_phase = None  # 'rest' | 'mvc'
 
         # Build content
         layout = BoxLayout(orientation='vertical', padding=16, spacing=12)
@@ -67,7 +66,6 @@ class CalibrationPopup(Popup):
         self._current_phase = 'rest'
         self._rest_samples = []
         self.status_label.text = 'Phase 1 of 2: Rest'
-        self.status_label.text = 'Phase 1 of 2: Rest'
         self.instruction_label.text = 'Relax your muscle completely.'
         self.progress.value = 0
         self.on_sample_connect(self._collect_sample)
@@ -76,7 +74,6 @@ class CalibrationPopup(Popup):
     def _start_mvc_phase(self, dt=None):
         self._current_phase = 'mvc'
         self._mvc_samples = []
-        self.status_label.text = 'Phase 2 of 2: MVC'
         self.status_label.text = 'Phase 2 of 2: MVC'
         self.instruction_label.text = 'Contract as hard as you can!'
         self.progress.value = 0
@@ -90,7 +87,6 @@ class CalibrationPopup(Popup):
             return
 
         all_data = np.concatenate(self._mvc_samples, axis=1)
-        all_data = np.concatenate(self._mvc_samples, axis=1)
         hd_channels = min(all_data.shape[0], CFG.HDSEMG_CHANNELS)
         hd_data = all_data[:hd_channels]
         rms_per_ch = np.sqrt(np.mean(hd_data ** 2, axis=1))
@@ -99,11 +95,9 @@ class CalibrationPopup(Popup):
 
         if concentration > CFG.CALIBRATION_VERIFY_ACTIVE_FRAC:
             self.status_label.text = 'Calibration: PASS'
-            self.status_label.text = 'Calibration: PASS'
             self.status_label.color = (0.2, 0.9, 0.2, 1)
             self.instruction_label.text = 'Activation pattern looks good!'
         else:
-            self.status_label.text = 'Calibration: WARNING'
             self.status_label.text = 'Calibration: WARNING'
             self.status_label.color = (1.0, 0.6, 0.1, 1)
             self.instruction_label.text = 'Diffuse activation — check electrode placement'
