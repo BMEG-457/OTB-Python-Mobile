@@ -11,6 +11,7 @@ from kivy.uix.button import Button
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
+from kivy.uix.popup import Popup
 from kivy.clock import Clock
 from kivy.metrics import dp, sp
 
@@ -1011,12 +1012,24 @@ class LiveDataScreen(Screen):
         self.btn_record.color = (1, 1, 1, 1)
         self.btn_record.disabled = False
         self._set_status('Saved' if success else 'Save failed')
-        self._set_bottom(message)
+        self._show_save_popup(success, message)
+
+    def _show_save_popup(self, success, message):
+        title = 'Recording Saved' if success else 'Save Failed'
+        content = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(10))
+        content.add_widget(Label(text=message, font_size=sp(14), halign='center',
+                                 text_size=(dp(260), None)))
+        btn = Button(text='OK', size_hint=(1, None), height=dp(50), font_size=sp(15))
+        content.add_widget(btn)
+        popup = Popup(title=title, content=content,
+                      size_hint=(0.8, None), height=dp(220), auto_dismiss=True)
+        btn.bind(on_release=popup.dismiss)
+        popup.open()
 
     def _on_recording_overflow(self):
         Clock.schedule_once(lambda dt: self._stop_recording(), 0)
         Clock.schedule_once(
-            lambda dt: self._set_bottom('Recording stopped: max samples reached.'), 0
+            lambda dt: self._show_save_popup(False, 'Recording stopped: max samples reached.'), 0
         )
 
     # ------------------------------------------------------------------

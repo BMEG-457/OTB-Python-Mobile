@@ -1,6 +1,6 @@
 {
   "build": {
-    "emulator_build": false
+    "emulator_build": true
   },
 
   "device": {
@@ -24,7 +24,7 @@
   },
 
   "adapter": {
-    "type": "ad2x32sp",
+    "type": "ad1x64sp",
     "heatmap_mode": "removed",
     "channel_map": null
   },
